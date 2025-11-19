@@ -9,7 +9,7 @@ const htmlContent = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloud Sync - 安全传输</title>
+    <title>Cloud Sync - 极简传输</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         ::-webkit-scrollbar { width: 6px; }
@@ -17,9 +17,27 @@ const htmlContent = `
         .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff; }
         .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* === Toast 消息组件样式 (无感提醒) === */
+        #toast-container {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 9999; pointer-events: none;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .toast {
+            background: rgba(0, 0, 0, 0.75); color: white; padding: 10px 20px;
+            border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); pointer-events: auto;
+            display: flex; items-center: center;
+        }
+        .toast.show { opacity: 1; }
+        .toast-success { border-left: 4px solid #4ade80; }
+        .toast-error { border-left: 4px solid #f87171; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-700 h-screen flex flex-col md:flex-row overflow-hidden">
+
+    <div id="toast-container"></div>
 
     <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 flex flex-col border-r border-gray-200 bg-white">
         <div class="flex justify-between items-center mb-4">
@@ -35,15 +53,20 @@ const htmlContent = `
 
     <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 flex flex-col bg-gray-50">
         <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold text-gray-800">📂 文件传输 <span class="text-xs font-normal text-gray-400">(私有加密)</span></h2>
-            <div class="space-x-2">
-                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-1 rounded shadow-sm">🔄 刷新列表</button>
-                 <button onclick="uploadFromClipboard()" class="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1 rounded">上传剪切板图片</button>
+            <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
+            <div class="space-x-2 flex">
+                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-1 rounded shadow-sm whitespace-nowrap">🔄 刷新</button>
+                 <button onclick="uploadFromClipboard()" class="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1 rounded whitespace-nowrap flex items-center">
+                    📋 粘贴上传
+                 </button>
             </div>
         </div>
 
         <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer transition hover:border-blue-400 mb-4 relative">
-            <p class="text-gray-500 pointer-events-none">拖拽文件、粘贴(Ctrl+V) 或 <span class="text-blue-500">点击上传</span></p>
+            <p class="text-gray-500 pointer-events-none">
+                拖拽、Ctrl+V 或 <span class="text-blue-500">点击上传</span>
+            </p>
+            <p class="text-gray-400 text-xs mt-2 md:hidden">手机端请点击右上角“粘贴上传”</p>
             <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
         </div>
 
@@ -57,7 +80,7 @@ const htmlContent = `
         <div class="bg-white p-2 rounded max-w-3xl max-h-[90vh] overflow-auto relative" onclick="event.stopPropagation()">
              <img id="previewImage" src="" class="max-w-full h-auto block rounded">
              <div id="previewUnknown" class="p-10 hidden text-center">无法预览此文件类型</div>
-             <button onclick="closePreview()" class="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full p-1 w-8 h-8">✕</button>
+             <button onclick="closePreview()" class="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full p-1 w-8 h-8 flex items-center justify-center">✕</button>
         </div>
     </div>
 
@@ -65,6 +88,24 @@ const htmlContent = `
     const API_BASE = '/api'; 
     const notepad = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
+
+    // === 0. Toast 消息工具 (无感提醒) ===
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = \`toast \${type === 'success' ? 'toast-success' : 'toast-error'}\`;
+        toast.innerText = message;
+        container.appendChild(toast);
+        
+        // 动画进入
+        requestAnimationFrame(() => toast.classList.add('show'));
+
+        // 3秒后移除
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
 
     // === 1. 文本逻辑 ===
     async function loadText() {
@@ -87,7 +128,11 @@ const htmlContent = `
     });
 
     function copyText() {
-        notepad.select(); document.execCommand('copy'); alert('文本已复制');
+        notepad.select(); 
+        try {
+            document.execCommand('copy'); 
+            showToast('✅ 文本已复制');
+        } catch(e) { showToast('复制失败', 'error'); }
     }
 
     async function readTextClipboard() {
@@ -95,7 +140,8 @@ const htmlContent = `
             const text = await navigator.clipboard.readText();
             notepad.value = text;
             notepad.dispatchEvent(new Event('blur'));
-        } catch (err) { alert('无法读取剪切板 (需要HTTPS)'); }
+            showToast('已读取剪切板文本');
+        } catch (err) { showToast('读取失败，请检查权限', 'error'); }
     }
 
     // === 2. 文件列表与操作 ===
@@ -115,9 +161,9 @@ const htmlContent = `
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
                 
                 const li = document.createElement('li');
-                li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group transition';
+                li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group transition border-b border-gray-50 last:border-0';
                 li.innerHTML = \`
-                    <div class="flex items-center overflow-hidden flex-1 mr-4">
+                    <div class="flex items-center overflow-hidden flex-1 mr-2">
                         <div class="mr-3 text-2xl">\${isImg ? '🖼️' : '📄'}</div>
                         <div class="overflow-hidden">
                             <div class="font-medium text-sm truncate cursor-pointer text-gray-700 hover:text-blue-600" 
@@ -125,37 +171,59 @@ const htmlContent = `
                             <div class="text-xs text-gray-400">\${sizeStr} • \${new Date(file.date).toLocaleString()}</div>
                         </div>
                     </div>
-                    <div class="flex space-x-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <a href="\${file.url}" download="\${displayName}" class="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">下载</a>
-                        <button onclick="copyFileContent('\${file.url}', \${isImg})" class="px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100">
-                            \${isImg ? '复制图片' : '复制链接'}
+                    <div class="flex space-x-2">
+                        <a href="\${file.url}" download="\${displayName}" class="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 flex items-center">下载</a>
+                        <button onclick="copyFileContent('\${file.url}', \${isImg}, '\${displayName}')" class="px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100 flex items-center">
+                            \${isImg ? '复制' : '链接'}
                         </button>
-                        <button onclick="deleteFile('\${file.key}')" class="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">删除</button>
+                        <button onclick="deleteFile('\${file.key}')" class="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center">删除</button>
                     </div>\`;
                 fileListEl.appendChild(li);
             });
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
     }
 
-    // 核心：复制本体逻辑
-    async function copyFileContent(url, isImg) {
-        if (isImg) {
+    // === 核心修复：智能复制逻辑 (适配安卓) ===
+    async function copyFileContent(url, isImg, filename) {
+        // 1. 安卓/iOS 优先尝试调用系统分享 (Web Share API)
+        // 这是移动端最完美的“复制”体验，可以直接发给微信/QQ
+        if (isImg && navigator.canShare && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
             try {
-                // 1. 获取图片数据 Blob
+                showToast('正在调起系统分享...', 'success');
                 const response = await fetch(url);
                 const blob = await response.blob();
-                // 2. 写入剪切板
+                const file = new File([blob], filename, { type: blob.type });
+                
+                await navigator.share({
+                    files: [file],
+                    title: filename,
+                    text: '来自 Cloud Sync 的图片'
+                });
+                return; // 分享成功则结束
+            } catch (err) {
+                console.log('System share failed, fallback to clipboard', err);
+                // 分享取消或失败，继续尝试普通复制
+            }
+        }
+
+        // 2. PC端 或 移动端分享失败的回退：写入剪切板
+        if (isImg) {
+            try {
+                showToast('正在下载图片数据...', 'success');
+                const response = await fetch(url);
+                const blob = await response.blob();
                 await navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob })
                 ]);
-                alert('✅ 图片本体已复制！可在微信/文档中直接粘贴');
+                showToast('✅ 图片已复制，可直接粘贴');
             } catch (err) {
                 console.error(err);
-                alert('复制图片失败，可能是浏览器不支持或跨域问题');
+                // 3. 最终回退：复制链接
+                navigator.clipboard.writeText(url).then(() => showToast('⚠️ 浏览器限制，已复制图片链接', 'error'));
             }
         } else {
             // 非图片文件只能复制链接
-            navigator.clipboard.writeText(url).then(() => alert('🔗 文件下载链接已复制'));
+            navigator.clipboard.writeText(url).then(() => showToast('🔗 文件链接已复制'));
         }
     }
 
@@ -163,6 +231,7 @@ const htmlContent = `
         if(!confirm('确定删除文件?')) return;
         await fetch(API_BASE + '/delete', { method: 'POST', body: JSON.stringify({ key }) });
         refreshFiles();
+        showToast('文件已删除');
     }
 
     // === 3. 上传逻辑 ===
@@ -176,6 +245,8 @@ const htmlContent = `
         handleFiles(e.dataTransfer.files);
     });
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    
+    // 全局粘贴监听 (PC端习惯)
     document.addEventListener('paste', (e) => {
         const items = e.clipboardData.items;
         const files = [];
@@ -196,27 +267,56 @@ const htmlContent = `
                 });
                 const { url } = await signRes.json();
                 await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-            } catch (e) { alert('上传失败: ' + file.name); }
+                showToast(\`\${file.name} 上传成功\`);
+            } catch (e) { showToast(\`\${file.name} 上传失败\`, 'error'); }
         }
-        dropZone.innerHTML = '<p class="text-gray-500 pointer-events-none">拖拽文件、粘贴(Ctrl+V) 或 <span class="text-blue-500">点击上传</span></p><input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">';
+        dropZone.innerHTML = '<p class="text-gray-500 pointer-events-none">拖拽、Ctrl+V 或 <span class="text-blue-500">点击上传</span></p><input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">';
         refreshFiles();
     }
 
+    // === 核心修复：主动触发剪切板上传 (适配安卓) ===
     async function uploadFromClipboard() {
         try {
+            // 尝试读取剪切板内容
+            // 注意：这在安卓 Chrome 上通常只支持文本，图片支持很有限
+            // 但添加按钮后，部分浏览器允许在用户交互时读取
             const items = await navigator.clipboard.read();
             const files = [];
             for (const item of items) {
-                for (const type of item.types) {
-                    if (type.startsWith('image/')) {
-                        const blob = await item.getType(type);
-                        files.push(new File([blob], 'clipboard_' + Date.now() + '.png', { type }));
-                    }
+                // 优先寻找图片类型
+                const imageType = item.types.find(t => t.startsWith('image/'));
+                if (imageType) {
+                    const blob = await item.getType(imageType);
+                    files.push(new File([blob], 'clipboard_' + Date.now() + '.' + imageType.split('/')[1], { type: imageType }));
                 }
             }
-            if (files.length > 0) handleFiles(files);
-            else alert("剪切板无图片");
-        } catch (err) { alert("读取失败 (需要HTTPS)"); }
+            
+            if (files.length > 0) {
+                handleFiles(files);
+            } else {
+                // 如果读不到文件，尝试读取文本（比如图片链接）
+                try {
+                    const text = await navigator.clipboard.readText();
+                    if(text) {
+                        notepad.value = text;
+                        notepad.dispatchEvent(new Event('blur'));
+                        showToast('剪切板是文字，已同步到左侧');
+                    } else {
+                        showToast('剪切板无图片', 'error');
+                    }
+                } catch(e) {
+                    showToast('剪切板为空或浏览器不支持读取', 'error');
+                }
+            }
+        } catch (err) {
+            console.error(err);
+            // 给移动端用户的明确提示
+            if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
+                showToast('手机浏览器限制直接读取剪切板图片，请使用“点击上传”', 'error');
+            } else {
+                showToast('读取失败 (需HTTPS或授权)', 'error');
+            }
+        }
     }
 
     // === 4. 预览 ===
@@ -291,33 +391,27 @@ export default {
       }
     }
 
-    // 3. 获取文件列表 (核心修改：生成带签名的下载链接)
+    // 3. 获取文件列表 (带签名)
     if (url.pathname === '/api/files' && request.method === 'GET') {
       const res = await client.fetch(`${bucketUrl}?list-type=2&prefix=uploads/`);
       const xml = await res.text();
       const files = [];
       const contentsRegex = /<Contents>([\s\S]*?)<\/Contents>/g;
       let match;
-      
-      // 解析 XML
       while ((match = contentsRegex.exec(xml)) !== null) {
         const content = match[1];
         const key = /<Key>(.*?)<\/Key>/.exec(content)[1];
         const size = /<Size>(.*?)<\/Size>/.exec(content)[1];
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
-        
         if(!key.endsWith('/')) {
-            // === 关键变化：生成带签名的 GET URL ===
-            // 有效期 3600秒 (1小时)
+            // 生成带签名的 GET URL (1小时有效)
             const signedUrl = await client.sign(`${bucketUrl}/${key}`, {
                 method: 'GET',
                 aws: { signQuery: true }
             });
-            
             files.push({ key, size, date, url: signedUrl.url });
         }
       }
-      
       files.sort((a, b) => new Date(b.date) - new Date(a.date));
       return new Response(JSON.stringify(files), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
