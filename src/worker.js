@@ -8,12 +8,14 @@ const htmlContent = `
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Cloud Sync - 极简传输</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        /* 移动端优化 */
+        body { -webkit-tap-highlight-color: transparent; }
         .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff; }
         .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -22,17 +24,29 @@ const htmlContent = `
         #toast-container {
             position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
             z-index: 9999; pointer-events: none;
-            display: flex; flex-direction: column; gap: 10px;
+            display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 400px;
         }
         .toast {
-            background: rgba(0, 0, 0, 0.75); color: white; padding: 10px 20px;
-            border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s;
+            background: rgba(0, 0, 0, 0.8); color: white; padding: 12px 20px;
+            border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s, transform 0.3s;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); pointer-events: auto;
-            display: flex; items-center: center;
+            display: flex; align-items: center; transform: translateY(-20px);
         }
-        .toast.show { opacity: 1; }
+        .toast.show { opacity: 1; transform: translateY(0); }
         .toast-success { border-left: 4px solid #4ade80; }
         .toast-error { border-left: 4px solid #f87171; }
+        .toast-info { border-left: 4px solid #60a5fa; }
+
+        /* 粘贴专用区域样式 */
+        #pasteTarget {
+            font-size: 14px; color: #6b7280; background: #f9fafb;
+            border: 1px dashed #d1d5db; border-radius: 6px;
+            padding: 12px; margin-top: 10px; outline: none;
+            min-height: 44px; display: flex; align-items: center; justify-content: center;
+        }
+        #pasteTarget:focus { border-color: #3b82f6; background: #eff6ff; color: #3b82f6; }
+        #pasteTarget::before { content: "📱 手机端点此 -> 长按粘贴 -> 上传图片"; }
+        #pasteTarget:not(:empty)::before { content: none; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-700 h-screen flex flex-col md:flex-row overflow-hidden">
@@ -43,8 +57,8 @@ const htmlContent = `
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📝 文本同步</h2>
             <div class="space-x-2">
-                <button onclick="readTextClipboard()" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded">读取剪切板</button>
-                <button onclick="copyText()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1 rounded">复制全文</button>
+                <button onclick="readTextClipboard()" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded active:bg-gray-300">读取剪切板</button>
+                <button onclick="copyText()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-2 rounded active:bg-blue-200">复制全文</button>
                 <span id="saveStatus" class="text-xs text-green-500 hidden">已保存</span>
             </div>
         </div>
@@ -55,19 +69,21 @@ const htmlContent = `
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
             <div class="space-x-2 flex">
-                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-1 rounded shadow-sm whitespace-nowrap">🔄 刷新</button>
-                 <button onclick="uploadFromClipboard()" class="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1 rounded whitespace-nowrap flex items-center">
-                    📋 粘贴上传
+                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 刷新</button>
+                 <button onclick="document.getElementById('fileInput').click()" class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-blue-800">
+                    📤 选择文件
                  </button>
             </div>
         </div>
 
-        <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer transition hover:border-blue-400 mb-4 relative">
-            <p class="text-gray-500 pointer-events-none">
-                拖拽、Ctrl+V 或 <span class="text-blue-500">点击上传</span>
+        <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition hover:border-blue-400 mb-4 relative flex flex-col justify-center">
+            <p class="text-gray-500 pointer-events-none text-sm hidden md:block">
+                电脑端：拖拽文件 或 Ctrl+V 粘贴
             </p>
-            <p class="text-gray-400 text-xs mt-2 md:hidden">手机端请点击右上角“粘贴上传”</p>
-            <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+            
+            <div id="pasteTarget" contenteditable="true"></div>
+            
+            <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer hidden">
         </div>
 
         <div class="flex-1 overflow-y-auto bg-white rounded-lg shadow-sm border border-gray-100">
@@ -76,11 +92,11 @@ const htmlContent = `
         </div>
     </div>
 
-    <div id="previewModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50" onclick="closePreview()">
-        <div class="bg-white p-2 rounded max-w-3xl max-h-[90vh] overflow-auto relative" onclick="event.stopPropagation()">
-             <img id="previewImage" src="" class="max-w-full h-auto block rounded">
-             <div id="previewUnknown" class="p-10 hidden text-center">无法预览此文件类型</div>
-             <button onclick="closePreview()" class="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 rounded-full p-1 w-8 h-8 flex items-center justify-center">✕</button>
+    <div id="previewModal" class="fixed inset-0 bg-black bg-opacity-80 hidden flex items-center justify-center z-50" onclick="closePreview()">
+        <div class="bg-transparent p-2 rounded max-w-full max-h-full overflow-auto relative" onclick="event.stopPropagation()">
+             <img id="previewImage" src="" class="max-w-full max-h-[90vh] block rounded shadow-lg">
+             <div id="previewUnknown" class="p-10 hidden text-center text-white">无法预览此文件类型</div>
+             <button onclick="closePreview()" class="absolute -top-10 right-0 text-white text-xl p-2">✕ 关闭</button>
         </div>
     </div>
 
@@ -89,18 +105,14 @@ const htmlContent = `
     const notepad = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
 
-    // === 0. Toast 消息工具 (无感提醒) ===
+    // === 0. Toast 消息工具 ===
     function showToast(message, type = 'success') {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
-        toast.className = \`toast \${type === 'success' ? 'toast-success' : 'toast-error'}\`;
+        toast.className = \`toast \${type === 'success' ? 'toast-success' : (type === 'error' ? 'toast-error' : 'toast-info')}\`;
         toast.innerText = message;
         container.appendChild(toast);
-        
-        // 动画进入
         requestAnimationFrame(() => toast.classList.add('show'));
-
-        // 3秒后移除
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 300);
@@ -141,7 +153,7 @@ const htmlContent = `
             notepad.value = text;
             notepad.dispatchEvent(new Event('blur'));
             showToast('已读取剪切板文本');
-        } catch (err) { showToast('读取失败，请检查权限', 'error'); }
+        } catch (err) { showToast('读取失败，请手动粘贴', 'error'); }
     }
 
     // === 2. 文件列表与操作 ===
@@ -161,7 +173,7 @@ const htmlContent = `
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
                 
                 const li = document.createElement('li');
-                li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group transition border-b border-gray-50 last:border-0';
+                li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group transition border-b border-gray-50';
                 li.innerHTML = \`
                     <div class="flex items-center overflow-hidden flex-1 mr-2">
                         <div class="mr-3 text-2xl">\${isImg ? '🖼️' : '📄'}</div>
@@ -183,46 +195,39 @@ const htmlContent = `
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
     }
 
-    // === 核心修复：智能复制逻辑 (适配安卓) ===
+    // === 3. 修复后的复制逻辑 ===
     async function copyFileContent(url, isImg, filename) {
-        // 1. 安卓/iOS 优先尝试调用系统分享 (Web Share API)
-        // 这是移动端最完美的“复制”体验，可以直接发给微信/QQ
+        // 移动端优先尝试系统分享
         if (isImg && navigator.canShare && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
             try {
-                showToast('正在调起系统分享...', 'success');
+                showToast('正在调起系统分享...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
                 const file = new File([blob], filename, { type: blob.type });
-                
-                await navigator.share({
-                    files: [file],
-                    title: filename,
-                    text: '来自 Cloud Sync 的图片'
-                });
-                return; // 分享成功则结束
-            } catch (err) {
-                console.log('System share failed, fallback to clipboard', err);
-                // 分享取消或失败，继续尝试普通复制
-            }
+                await navigator.share({ files: [file], title: filename });
+                return; 
+            } catch (err) { console.log('Share failed', err); }
         }
 
-        // 2. PC端 或 移动端分享失败的回退：写入剪切板
+        // PC端或分享失败，尝试写入剪切板
         if (isImg) {
             try {
-                showToast('正在下载图片数据...', 'success');
+                showToast('正在下载图片...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
+                
+                // 关键修复：ClipboardItem 必须要具体的 MIME type，且很多浏览器只支持 image/png
+                // 如果是 JPG，尝试直接写入，如果报错则捕获
                 await navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob })
                 ]);
                 showToast('✅ 图片已复制，可直接粘贴');
             } catch (err) {
                 console.error(err);
-                // 3. 最终回退：复制链接
-                navigator.clipboard.writeText(url).then(() => showToast('⚠️ 浏览器限制，已复制图片链接', 'error'));
+                // 降级处理：如果写图片失败（比如格式不支持），则复制链接
+                navigator.clipboard.writeText(url).then(() => showToast('⚠️ 格式不支持直接复制，已复制链接', 'info'));
             }
         } else {
-            // 非图片文件只能复制链接
             navigator.clipboard.writeText(url).then(() => showToast('🔗 文件链接已复制'));
         }
     }
@@ -234,31 +239,55 @@ const htmlContent = `
         showToast('文件已删除');
     }
 
-    // === 3. 上传逻辑 ===
+    // === 4. 上传逻辑 (含安卓长按粘贴修复) ===
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
+    const pasteTarget = document.getElementById('pasteTarget');
 
+    // 拖拽上传
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault(); dropZone.classList.remove('drag-over');
         handleFiles(e.dataTransfer.files);
     });
-    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     
-    // 全局粘贴监听 (PC端习惯)
+    // 文件选择上传
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    // 全局粘贴 (PC端快捷键)
     document.addEventListener('paste', (e) => {
+        if (e.target === pasteTarget || e.target === notepad) return; // 如果在输入框内粘贴，交给输入框处理
+        handlePasteEvent(e);
+    });
+
+    // 核心修复：安卓端专用粘贴区域监听
+    pasteTarget.addEventListener('paste', (e) => {
+        e.preventDefault(); // 阻止默认粘贴（防止图片显示在框里）
+        handlePasteEvent(e);
+        pasteTarget.innerHTML = ''; // 清空提示文字
+        setTimeout(() => pasteTarget.blur(), 100); // 失去焦点，收起键盘
+    });
+    
+    // 处理粘贴事件的通用函数
+    function handlePasteEvent(e) {
         const items = e.clipboardData.items;
         const files = [];
         for (let i = 0; i < items.length; i++) {
             if (items[i].kind === 'file') files.push(items[i].getAsFile());
         }
-        if (files.length > 0) handleFiles(files);
-    });
+        if (files.length > 0) {
+            handleFiles(files);
+        } else {
+            // 如果粘贴的是纯文本链接，可以在这里处理，或者忽略
+            showToast('未检测到图片文件', 'info');
+        }
+    }
 
     async function handleFiles(files) {
         if (!files.length) return;
-        dropZone.innerHTML = '<p class="text-blue-500">正在加密上传...</p>';
+        showToast(\`开始上传 \${files.length} 个文件...\`, 'info');
+        
         for (let file of files) {
             try {
                 const signRes = await fetch(API_BASE + '/sign-upload', {
@@ -267,59 +296,13 @@ const htmlContent = `
                 });
                 const { url } = await signRes.json();
                 await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-                showToast(\`\${file.name} 上传成功\`);
-            } catch (e) { showToast(\`\${file.name} 上传失败\`, 'error'); }
+                showToast(\`✅ \${file.name} 上传成功\`);
+            } catch (e) { showToast(\`❌ \${file.name} 上传失败\`, 'error'); }
         }
-        dropZone.innerHTML = '<p class="text-gray-500 pointer-events-none">拖拽、Ctrl+V 或 <span class="text-blue-500">点击上传</span></p><input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">';
         refreshFiles();
     }
 
-    // === 核心修复：主动触发剪切板上传 (适配安卓) ===
-    async function uploadFromClipboard() {
-        try {
-            // 尝试读取剪切板内容
-            // 注意：这在安卓 Chrome 上通常只支持文本，图片支持很有限
-            // 但添加按钮后，部分浏览器允许在用户交互时读取
-            const items = await navigator.clipboard.read();
-            const files = [];
-            for (const item of items) {
-                // 优先寻找图片类型
-                const imageType = item.types.find(t => t.startsWith('image/'));
-                if (imageType) {
-                    const blob = await item.getType(imageType);
-                    files.push(new File([blob], 'clipboard_' + Date.now() + '.' + imageType.split('/')[1], { type: imageType }));
-                }
-            }
-            
-            if (files.length > 0) {
-                handleFiles(files);
-            } else {
-                // 如果读不到文件，尝试读取文本（比如图片链接）
-                try {
-                    const text = await navigator.clipboard.readText();
-                    if(text) {
-                        notepad.value = text;
-                        notepad.dispatchEvent(new Event('blur'));
-                        showToast('剪切板是文字，已同步到左侧');
-                    } else {
-                        showToast('剪切板无图片', 'error');
-                    }
-                } catch(e) {
-                    showToast('剪切板为空或浏览器不支持读取', 'error');
-                }
-            }
-        } catch (err) {
-            console.error(err);
-            // 给移动端用户的明确提示
-            if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
-                showToast('手机浏览器限制直接读取剪切板图片，请使用“点击上传”', 'error');
-            } else {
-                showToast('读取失败 (需HTTPS或授权)', 'error');
-            }
-        }
-    }
-
-    // === 4. 预览 ===
+    // === 5. 预览 ===
     window.preview = (url, isImg) => {
         const modal = document.getElementById('previewModal');
         const img = document.getElementById('previewImage');
@@ -344,7 +327,7 @@ const htmlContent = `
 `;
 
 // ==========================================
-// 2. 后端业务逻辑 (Worker)
+// 2. 后端业务逻辑 (Worker) - 保持不变
 // ==========================================
 
 export default {
@@ -369,14 +352,12 @@ export default {
     
     const bucketUrl = `https://${env.COS_BUCKET_NAME}.cos.${env.COS_REGION}.myqcloud.com`;
 
-    // 1. 首页
     if (url.pathname === '/') {
         return new Response(htmlContent, {
             headers: { 'Content-Type': 'text/html;charset=UTF-8' }
         });
     }
 
-    // 2. 文本同步
     if (url.pathname === '/api/text') {
       const textKey = 'sync_data/notepad.txt';
       if (request.method === 'GET') {
@@ -391,7 +372,6 @@ export default {
       }
     }
 
-    // 3. 获取文件列表 (带签名)
     if (url.pathname === '/api/files' && request.method === 'GET') {
       const res = await client.fetch(`${bucketUrl}?list-type=2&prefix=uploads/`);
       const xml = await res.text();
@@ -404,7 +384,6 @@ export default {
         const size = /<Size>(.*?)<\/Size>/.exec(content)[1];
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         if(!key.endsWith('/')) {
-            // 生成带签名的 GET URL (1小时有效)
             const signedUrl = await client.sign(`${bucketUrl}/${key}`, {
                 method: 'GET',
                 aws: { signQuery: true }
@@ -416,7 +395,6 @@ export default {
       return new Response(JSON.stringify(files), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // 4. 获取上传签名 (PUT)
     if (url.pathname === '/api/sign-upload' && request.method === 'POST') {
       const { filename, type } = await request.json();
       const key = `uploads/${Date.now()}_${filename}`;
@@ -428,7 +406,6 @@ export default {
       return new Response(JSON.stringify({ url: signed.url, key: key }), { headers: corsHeaders });
     }
 
-    // 5. 删除文件
     if (url.pathname === '/api/delete' && request.method === 'POST') {
         const { key } = await request.json();
         await client.fetch(`${bucketUrl}/${key}`, { method: 'DELETE' });
