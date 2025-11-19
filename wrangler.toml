@@ -1,0 +1,7 @@
+name = "web-sync"
+main = "src/worker.js"
+compatibility_date = "2023-10-30"
+
+[vars]
+COS_BUCKET_NAME = "web-sync-1317231591"
+COS_REGION = "ap-guangzhou"
