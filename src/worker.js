@@ -69,7 +69,7 @@ const htmlContent = `
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
             <div class="space-x-2 flex">
-                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 刷新</button>
+                 <button onclick="refreshAll()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 全局刷新</button>
                  <button onclick="document.getElementById('fileInput').click()" class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-blue-800">
                     📤 选择文件
                  </button>
@@ -160,7 +160,12 @@ const htmlContent = `
     const fileListEl = document.getElementById('fileList');
     const loadingEl = document.getElementById('loading');
 
-    async function refreshFiles() {
+    // 核心修改：合并刷新功能
+    async function refreshAll() {
+        // 1. 并行刷新文本
+        loadText();
+        
+        // 2. 刷新文件列表
         fileListEl.innerHTML = '';
         loadingEl.classList.remove('hidden');
         try {
@@ -192,12 +197,12 @@ const htmlContent = `
                     </div>\`;
                 fileListEl.appendChild(li);
             });
+            showToast('已刷新最新内容', 'success');
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
     }
 
-    // === 3. 修复后的复制逻辑 ===
+    // === 3. 复制逻辑 ===
     async function copyFileContent(url, isImg, filename) {
-        // 移动端优先尝试系统分享
         if (isImg && navigator.canShare && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
             try {
                 showToast('正在调起系统分享...', 'info');
@@ -209,22 +214,17 @@ const htmlContent = `
             } catch (err) { console.log('Share failed', err); }
         }
 
-        // PC端或分享失败，尝试写入剪切板
         if (isImg) {
             try {
                 showToast('正在下载图片...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
-                
-                // 关键修复：ClipboardItem 必须要具体的 MIME type，且很多浏览器只支持 image/png
-                // 如果是 JPG，尝试直接写入，如果报错则捕获
                 await navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob })
                 ]);
                 showToast('✅ 图片已复制，可直接粘贴');
             } catch (err) {
                 console.error(err);
-                // 降级处理：如果写图片失败（比如格式不支持），则复制链接
                 navigator.clipboard.writeText(url).then(() => showToast('⚠️ 格式不支持直接复制，已复制链接', 'info'));
             }
         } else {
@@ -235,41 +235,36 @@ const htmlContent = `
     async function deleteFile(key) {
         if(!confirm('确定删除文件?')) return;
         await fetch(API_BASE + '/delete', { method: 'POST', body: JSON.stringify({ key }) });
-        refreshFiles();
+        refreshAll(); // 删除后全局刷新
         showToast('文件已删除');
     }
 
-    // === 4. 上传逻辑 (含安卓长按粘贴修复) ===
+    // === 4. 上传逻辑 ===
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const pasteTarget = document.getElementById('pasteTarget');
 
-    // 拖拽上传
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over');
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault(); dropZone.classList.remove('drag-over');
         handleFiles(e.dataTransfer.files);
     });
     
-    // 文件选择上传
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
-    // 全局粘贴 (PC端快捷键)
     document.addEventListener('paste', (e) => {
-        if (e.target === pasteTarget || e.target === notepad) return; // 如果在输入框内粘贴，交给输入框处理
+        if (e.target === pasteTarget || e.target === notepad) return; 
         handlePasteEvent(e);
     });
 
-    // 核心修复：安卓端专用粘贴区域监听
     pasteTarget.addEventListener('paste', (e) => {
-        e.preventDefault(); // 阻止默认粘贴（防止图片显示在框里）
+        e.preventDefault(); 
         handlePasteEvent(e);
-        pasteTarget.innerHTML = ''; // 清空提示文字
-        setTimeout(() => pasteTarget.blur(), 100); // 失去焦点，收起键盘
+        pasteTarget.innerHTML = ''; 
+        setTimeout(() => pasteTarget.blur(), 100); 
     });
     
-    // 处理粘贴事件的通用函数
     function handlePasteEvent(e) {
         const items = e.clipboardData.items;
         const files = [];
@@ -279,7 +274,6 @@ const htmlContent = `
         if (files.length > 0) {
             handleFiles(files);
         } else {
-            // 如果粘贴的是纯文本链接，可以在这里处理，或者忽略
             showToast('未检测到图片文件', 'info');
         }
     }
@@ -299,7 +293,7 @@ const htmlContent = `
                 showToast(\`✅ \${file.name} 上传成功\`);
             } catch (e) { showToast(\`❌ \${file.name} 上传失败\`, 'error'); }
         }
-        refreshFiles();
+        refreshAll(); // 上传成功后全局刷新
     }
 
     // === 5. 预览 ===
@@ -319,8 +313,8 @@ const htmlContent = `
         document.getElementById('previewImage').src = '';
     }
 
-    loadText();
-    refreshFiles();
+    // 初始化
+    refreshAll(); // 页面加载时执行一次全局刷新
 </script>
 </body>
 </html>
