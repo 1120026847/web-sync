@@ -19,22 +19,30 @@ const htmlContent = `
         .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* === Toast 消息组件 === */
+        /* === Toast 消息组件 (极简绿色小字版) === */
         #toast-container {
-            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
             z-index: 9999; pointer-events: none;
-            display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 400px;
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
         }
         .toast {
-            background: rgba(0, 0, 0, 0.8); color: white; padding: 12px 20px;
-            border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s, transform 0.3s;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); pointer-events: auto;
-            display: flex; align-items: center; transform: translateY(-20px);
+            /* 默认成功样式：白底绿字，细边框，阴影 */
+            background: #ffffff; 
+            color: #059669; /* green-600 */
+            border: 1px solid #d1fae5; /* green-100 */
+            padding: 8px 20px;
+            border-radius: 99px; /* 胶囊圆角 */
+            font-size: 13px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            opacity: 0; transition: all 0.3s ease; transform: translateY(-10px);
+            display: flex; align-items: center; font-weight: 500;
         }
         .toast.show { opacity: 1; transform: translateY(0); }
-        .toast-success { border-left: 4px solid #4ade80; }
-        .toast-error { border-left: 4px solid #f87171; }
-        .toast-info { border-left: 4px solid #60a5fa; }
+        
+        /* 错误提示：白底红字 */
+        .toast-error { color: #dc2626; border-color: #fee2e2; }
+        /* 普通信息：白底蓝字 */
+        .toast-info { color: #2563eb; border-color: #dbeafe; }
 
         /* === 粘贴区域 === */
         #pasteTarget {
@@ -100,7 +108,7 @@ const htmlContent = `
     </div>
 
 <script>
-    // === 注意：这里全部改用单引号拼接，避免模板字符串嵌套导致的 SyntaxError ===
+    // 使用安全的字符串拼接，防止 Worker 解析错误
     const API_BASE = '/api'; 
     const notepad = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
@@ -109,15 +117,18 @@ const htmlContent = `
         if (!type) type = 'success';
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
-        // 改用拼接
-        toast.className = 'toast ' + (type === 'success' ? 'toast-success' : (type === 'error' ? 'toast-error' : 'toast-info'));
+        // 动态拼接 CSS 类名
+        toast.className = 'toast ' + (type === 'success' ? '' : (type === 'error' ? 'toast-error' : 'toast-info'));
         toast.innerText = message;
         container.appendChild(toast);
+        
         requestAnimationFrame(function() { toast.classList.add('show'); });
+        
+        // 2秒后消失
         setTimeout(function() {
             toast.classList.remove('show');
             setTimeout(function() { toast.remove(); }, 300);
-        }, 3000);
+        }, 2000);
     }
 
     async function loadText() {
@@ -143,7 +154,7 @@ const htmlContent = `
         notepad.select(); 
         try {
             document.execCommand('copy'); 
-            showToast('✅ 文本已复制');
+            showToast('文本已复制');
         } catch(e) { showToast('复制失败', 'error'); }
     }
 
@@ -152,7 +163,7 @@ const htmlContent = `
             const text = await navigator.clipboard.readText();
             notepad.value = text;
             notepad.dispatchEvent(new Event('blur'));
-            showToast('已读取剪切板文本');
+            showToast('已读取剪切板');
         } catch (err) { showToast('读取失败，请手动粘贴', 'error'); }
     }
 
@@ -161,10 +172,8 @@ const htmlContent = `
     const loadingEl = document.getElementById('loading');
 
     async function refreshAll() {
-        // 刷新文本
         loadText();
         
-        // 刷新文件
         fileListEl.innerHTML = '';
         loadingEl.classList.remove('hidden');
         try {
@@ -200,7 +209,6 @@ const htmlContent = `
                 
                 const dateDiv = document.createElement('div');
                 dateDiv.className = 'text-xs text-gray-400';
-                // 改用拼接
                 dateDiv.textContent = sizeStr + ' • ' + new Date(file.date).toLocaleString();
                 infoDiv.appendChild(dateDiv);
                 
@@ -233,14 +241,15 @@ const htmlContent = `
                 li.appendChild(rightDiv);
                 fileListEl.appendChild(li);
             });
-            showToast('已刷新最新内容', 'success');
+            showToast('内容已刷新');
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
     }
 
     async function copyFileContent(url, isImg, filename) {
+        // 移动端优先系统分享
         if (isImg && navigator.canShare && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
             try {
-                showToast('正在调起系统分享...', 'info');
+                showToast('正在调起分享...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
                 const file = new File([blob], filename, { type: blob.type });
@@ -251,19 +260,19 @@ const htmlContent = `
 
         if (isImg) {
             try {
-                showToast('正在下载图片...', 'info');
+                showToast('正在下载...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
                 await navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob })
                 ]);
-                showToast('✅ 图片已复制，可直接粘贴');
+                showToast('图片已复制');
             } catch (err) {
                 console.error(err);
-                navigator.clipboard.writeText(url).then(function() { showToast('⚠️ 格式不支持直接复制，已复制链接', 'info'); });
+                navigator.clipboard.writeText(url).then(function() { showToast('已复制链接', 'info'); });
             }
         } else {
-            navigator.clipboard.writeText(url).then(function() { showToast('🔗 文件链接已复制'); });
+            navigator.clipboard.writeText(url).then(function() { showToast('链接已复制'); });
         }
     }
 
@@ -308,14 +317,13 @@ const htmlContent = `
         if (files.length > 0) {
             handleFiles(files);
         } else {
-            showToast('未检测到图片文件', 'info');
+            showToast('未检测到图片', 'info');
         }
     }
 
     async function handleFiles(files) {
         if (!files.length) return;
-        // 改用拼接
-        showToast('开始上传 ' + files.length + ' 个文件...', 'info');
+        showToast('正在上传 ' + files.length + ' 个文件...', 'info');
         
         for (let file of files) {
             try {
@@ -325,9 +333,8 @@ const htmlContent = `
                 });
                 const { url } = await signRes.json();
                 await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-                // 改用拼接
-                showToast('✅ ' + file.name + ' 上传成功');
-            } catch (e) { showToast('❌ ' + file.name + ' 上传失败', 'error'); }
+                showToast(file.name + ' 上传成功');
+            } catch (e) { showToast(file.name + ' 上传失败', 'error'); }
         }
         refreshAll();
     }
@@ -348,7 +355,6 @@ const htmlContent = `
         document.getElementById('previewImage').src = '';
     }
 
-    // 初始化调用
     refreshAll();
 </script>
 </body>
@@ -356,7 +362,7 @@ const htmlContent = `
 `;
 
 // ==========================================
-// 2. 后端业务逻辑 (Worker) - 保持不变
+// 2. 后端业务逻辑 (Worker)
 // ==========================================
 
 export default {
