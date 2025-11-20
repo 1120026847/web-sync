@@ -14,13 +14,12 @@ const htmlContent = `
     <style>
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        /* 移动端优化 */
         body { -webkit-tap-highlight-color: transparent; }
         .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff; }
         .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* === Toast 消息组件样式 (无感提醒) === */
+        /* === Toast 消息组件 === */
         #toast-container {
             position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
             z-index: 9999; pointer-events: none;
@@ -37,7 +36,7 @@ const htmlContent = `
         .toast-error { border-left: 4px solid #f87171; }
         .toast-info { border-left: 4px solid #60a5fa; }
 
-        /* 粘贴专用区域样式 */
+        /* === 粘贴区域 === */
         #pasteTarget {
             font-size: 14px; color: #6b7280; background: #f9fafb;
             border: 1px dashed #d1d5db; border-radius: 6px;
@@ -69,7 +68,7 @@ const htmlContent = `
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
             <div class="space-x-2 flex">
-                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 刷新</button>
+                 <button onclick="refreshAll()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 全局刷新</button>
                  <button onclick="document.getElementById('fileInput').click()" class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-blue-800">
                     📤 选择文件
                  </button>
@@ -80,9 +79,7 @@ const htmlContent = `
             <p class="text-gray-500 pointer-events-none text-sm hidden md:block">
                 电脑端：拖拽文件 或 Ctrl+V 粘贴
             </p>
-            
             <div id="pasteTarget" contenteditable="true"></div>
-            
             <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer hidden">
         </div>
 
@@ -105,7 +102,6 @@ const htmlContent = `
     const notepad = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
 
-    // === 0. Toast 消息工具 ===
     function showToast(message, type = 'success') {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
@@ -156,17 +152,20 @@ const htmlContent = `
         } catch (err) { showToast('读取失败，请手动粘贴', 'error'); }
     }
 
-    // === 2. 文件列表与操作 ===
+    // === 2. 文件列表 (核心修复：使用 DOM 创建元素，杜绝引号报错) ===
     const fileListEl = document.getElementById('fileList');
     const loadingEl = document.getElementById('loading');
 
-    async function refreshFiles() {
+    async function refreshAll() {
+        loadText(); // 同时刷新文本
+        
         fileListEl.innerHTML = '';
         loadingEl.classList.remove('hidden');
         try {
             const res = await fetch(API_BASE + '/files');
             const files = await res.json();
             loadingEl.classList.add('hidden');
+            
             files.forEach(file => {
                 const sizeStr = (file.size / 1024).toFixed(1) + ' KB';
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
@@ -174,30 +173,67 @@ const htmlContent = `
                 
                 const li = document.createElement('li');
                 li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group transition border-b border-gray-50';
-                li.innerHTML = \`
-                    <div class="flex items-center overflow-hidden flex-1 mr-2">
-                        <div class="mr-3 text-2xl">\${isImg ? '🖼️' : '📄'}</div>
-                        <div class="overflow-hidden">
-                            <div class="font-medium text-sm truncate cursor-pointer text-gray-700 hover:text-blue-600" 
-                                 onclick="preview('\${file.url}', \${isImg})">\${displayName}</div>
-                            <div class="text-xs text-gray-400">\${sizeStr} • \${new Date(file.date).toLocaleString()}</div>
-                        </div>
-                    </div>
-                    <div class="flex space-x-2">
-                        <a href="\${file.url}" download="\${displayName}" class="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 flex items-center">下载</a>
-                        <button onclick="copyFileContent('\${file.url}', \${isImg}, '\${displayName}')" class="px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100 flex items-center">
-                            \${isImg ? '复制' : '链接'}
-                        </button>
-                        <button onclick="deleteFile('\${file.key}')" class="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center">删除</button>
-                    </div>\`;
+
+                // 左侧文件信息
+                const leftDiv = document.createElement('div');
+                leftDiv.className = 'flex items-center overflow-hidden flex-1 mr-2';
+                
+                const iconDiv = document.createElement('div');
+                iconDiv.className = 'mr-3 text-2xl';
+                iconDiv.textContent = isImg ? '🖼️' : '📄';
+                
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'overflow-hidden';
+                
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'font-medium text-sm truncate cursor-pointer text-gray-700 hover:text-blue-600';
+                nameDiv.textContent = displayName;
+                nameDiv.onclick = () => preview(file.url, isImg);
+                
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'text-xs text-gray-400';
+                metaDiv.textContent = \`\${sizeStr} • \${new Date(file.date).toLocaleString()}\`;
+                
+                infoDiv.appendChild(nameDiv);
+                infoDiv.appendChild(metaDiv);
+                leftDiv.appendChild(iconDiv);
+                leftDiv.appendChild(infoDiv);
+
+                // 右侧按钮组
+                const rightDiv = document.createElement('div');
+                rightDiv.className = 'flex space-x-2';
+
+                const btnDownload = document.createElement('a');
+                btnDownload.href = file.url;
+                btnDownload.download = displayName;
+                btnDownload.className = 'px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 flex items-center';
+                btnDownload.textContent = '下载';
+
+                const btnCopy = document.createElement('button');
+                btnCopy.className = 'px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100 flex items-center';
+                btnCopy.textContent = isImg ? '复制' : '链接';
+                btnCopy.onclick = () => copyFileContent(file.url, isImg, displayName);
+
+                const btnDelete = document.createElement('button');
+                btnDelete.className = 'px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center';
+                btnDelete.textContent = '删除';
+                btnDelete.onclick = () => deleteFile(file.key);
+
+                rightDiv.appendChild(btnDownload);
+                rightDiv.appendChild(btnCopy);
+                rightDiv.appendChild(btnDelete);
+
+                li.appendChild(leftDiv);
+                li.appendChild(rightDiv);
+                
                 fileListEl.appendChild(li);
             });
+            showToast('已刷新最新内容', 'success');
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
     }
 
-    // === 3. 修复后的复制逻辑 ===
+    // === 3. 复制逻辑 ===
     async function copyFileContent(url, isImg, filename) {
-        // 移动端优先尝试系统分享
         if (isImg && navigator.canShare && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
             try {
                 showToast('正在调起系统分享...', 'info');
@@ -209,22 +245,17 @@ const htmlContent = `
             } catch (err) { console.log('Share failed', err); }
         }
 
-        // PC端或分享失败，尝试写入剪切板
         if (isImg) {
             try {
                 showToast('正在下载图片...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
-                
-                // 关键修复：ClipboardItem 必须要具体的 MIME type，且很多浏览器只支持 image/png
-                // 如果是 JPG，尝试直接写入，如果报错则捕获
                 await navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob })
                 ]);
                 showToast('✅ 图片已复制，可直接粘贴');
             } catch (err) {
                 console.error(err);
-                // 降级处理：如果写图片失败（比如格式不支持），则复制链接
                 navigator.clipboard.writeText(url).then(() => showToast('⚠️ 格式不支持直接复制，已复制链接', 'info'));
             }
         } else {
@@ -235,41 +266,36 @@ const htmlContent = `
     async function deleteFile(key) {
         if(!confirm('确定删除文件?')) return;
         await fetch(API_BASE + '/delete', { method: 'POST', body: JSON.stringify({ key }) });
-        refreshFiles();
+        refreshAll();
         showToast('文件已删除');
     }
 
-    // === 4. 上传逻辑 (含安卓长按粘贴修复) ===
+    // === 4. 上传逻辑 ===
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const pasteTarget = document.getElementById('pasteTarget');
 
-    // 拖拽上传
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over');
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault(); dropZone.classList.remove('drag-over');
         handleFiles(e.dataTransfer.files);
     });
     
-    // 文件选择上传
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
-    // 全局粘贴 (PC端快捷键)
     document.addEventListener('paste', (e) => {
-        if (e.target === pasteTarget || e.target === notepad) return; // 如果在输入框内粘贴，交给输入框处理
+        if (e.target === pasteTarget || e.target === notepad) return; 
         handlePasteEvent(e);
     });
 
-    // 核心修复：安卓端专用粘贴区域监听
     pasteTarget.addEventListener('paste', (e) => {
-        e.preventDefault(); // 阻止默认粘贴（防止图片显示在框里）
+        e.preventDefault(); 
         handlePasteEvent(e);
-        pasteTarget.innerHTML = ''; // 清空提示文字
-        setTimeout(() => pasteTarget.blur(), 100); // 失去焦点，收起键盘
+        pasteTarget.innerHTML = ''; 
+        setTimeout(() => pasteTarget.blur(), 100); 
     });
     
-    // 处理粘贴事件的通用函数
     function handlePasteEvent(e) {
         const items = e.clipboardData.items;
         const files = [];
@@ -279,7 +305,6 @@ const htmlContent = `
         if (files.length > 0) {
             handleFiles(files);
         } else {
-            // 如果粘贴的是纯文本链接，可以在这里处理，或者忽略
             showToast('未检测到图片文件', 'info');
         }
     }
@@ -299,7 +324,7 @@ const htmlContent = `
                 showToast(\`✅ \${file.name} 上传成功\`);
             } catch (e) { showToast(\`❌ \${file.name} 上传失败\`, 'error'); }
         }
-        refreshFiles();
+        refreshAll();
     }
 
     // === 5. 预览 ===
@@ -319,15 +344,14 @@ const htmlContent = `
         document.getElementById('previewImage').src = '';
     }
 
-    loadText();
-    refreshFiles();
+    refreshAll();
 </script>
 </body>
 </html>
 `;
 
 // ==========================================
-// 2. 后端业务逻辑 (Worker) - 保持不变
+// 2. 后端业务逻辑 (Worker)
 // ==========================================
 
 export default {
