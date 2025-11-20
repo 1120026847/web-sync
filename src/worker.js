@@ -14,13 +14,12 @@ const htmlContent = `
     <style>
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        /* 移动端优化 */
         body { -webkit-tap-highlight-color: transparent; }
         .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff; }
         .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* === Toast 消息组件样式 (无感提醒) === */
+        /* === Toast 消息组件 === */
         #toast-container {
             position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
             z-index: 9999; pointer-events: none;
@@ -37,7 +36,7 @@ const htmlContent = `
         .toast-error { border-left: 4px solid #f87171; }
         .toast-info { border-left: 4px solid #60a5fa; }
 
-        /* 粘贴专用区域样式 */
+        /* === 粘贴区域 === */
         #pasteTarget {
             font-size: 14px; color: #6b7280; background: #f9fafb;
             border: 1px dashed #d1d5db; border-radius: 6px;
@@ -101,20 +100,23 @@ const htmlContent = `
     </div>
 
 <script>
+    // === 注意：这里全部改用单引号拼接，避免模板字符串嵌套导致的 SyntaxError ===
     const API_BASE = '/api'; 
     const notepad = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
 
-    function showToast(message, type = 'success') {
+    function showToast(message, type) {
+        if (!type) type = 'success';
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
-        toast.className = \`toast \${type === 'success' ? 'toast-success' : (type === 'error' ? 'toast-error' : 'toast-info')}\`;
+        // 改用拼接
+        toast.className = 'toast ' + (type === 'success' ? 'toast-success' : (type === 'error' ? 'toast-error' : 'toast-info'));
         toast.innerText = message;
         container.appendChild(toast);
-        requestAnimationFrame(() => toast.classList.add('show'));
-        setTimeout(() => {
+        requestAnimationFrame(function() { toast.classList.add('show'); });
+        setTimeout(function() {
             toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
+            setTimeout(function() { toast.remove(); }, 300);
         }, 3000);
     }
 
@@ -125,13 +127,13 @@ const htmlContent = `
         } catch(e) { console.error(e); }
     }
 
-    notepad.addEventListener('blur', async () => {
+    notepad.addEventListener('blur', async function() {
         saveStatus.innerText = '保存中...';
         saveStatus.classList.remove('hidden');
         try {
             await fetch(API_BASE + '/text', { method: 'POST', body: notepad.value });
             saveStatus.innerText = '已保存';
-            setTimeout(() => saveStatus.classList.add('hidden'), 2000);
+            setTimeout(function() { saveStatus.classList.add('hidden'); }, 2000);
         } catch(e) {
             saveStatus.innerText = '保存失败'; saveStatus.classList.add('text-red-500');
         }
@@ -154,15 +156,15 @@ const htmlContent = `
         } catch (err) { showToast('读取失败，请手动粘贴', 'error'); }
     }
 
-    // === 核心修复：refreshAll 替代 refreshFiles，并使用 DOM 操作防止引号崩溃 ===
+    // === 列表渲染 ===
     const fileListEl = document.getElementById('fileList');
     const loadingEl = document.getElementById('loading');
 
     async function refreshAll() {
-        // 1. 刷新文本
+        // 刷新文本
         loadText();
-
-        // 2. 刷新文件
+        
+        // 刷新文件
         fileListEl.innerHTML = '';
         loadingEl.classList.remove('hidden');
         try {
@@ -170,16 +172,15 @@ const htmlContent = `
             const files = await res.json();
             loadingEl.classList.add('hidden');
             
-            files.forEach(file => {
+            files.forEach(function(file) {
                 const sizeStr = (file.size / 1024).toFixed(1) + ' KB';
-                // 即使这里 displayName 有引号，下面的 textContent 赋值也是安全的
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
                 
                 const li = document.createElement('li');
                 li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group transition border-b border-gray-50';
 
-                // === 左侧信息 ===
+                // 左侧信息
                 const leftDiv = document.createElement('div');
                 leftDiv.className = 'flex items-center overflow-hidden flex-1 mr-2';
                 
@@ -193,19 +194,20 @@ const htmlContent = `
                 
                 const nameDiv = document.createElement('div');
                 nameDiv.className = 'font-medium text-sm truncate cursor-pointer text-gray-700 hover:text-blue-600';
-                nameDiv.textContent = displayName; // 安全赋值
-                nameDiv.onclick = () => preview(file.url, isImg); // 安全绑定
+                nameDiv.textContent = displayName;
+                nameDiv.onclick = function() { preview(file.url, isImg); };
                 infoDiv.appendChild(nameDiv);
                 
                 const dateDiv = document.createElement('div');
                 dateDiv.className = 'text-xs text-gray-400';
-                dateDiv.textContent = \`\${sizeStr} • \${new Date(file.date).toLocaleString()}\`;
+                // 改用拼接
+                dateDiv.textContent = sizeStr + ' • ' + new Date(file.date).toLocaleString();
                 infoDiv.appendChild(dateDiv);
                 
                 leftDiv.appendChild(infoDiv);
                 li.appendChild(leftDiv);
 
-                // === 右侧按钮 ===
+                // 右侧按钮
                 const rightDiv = document.createElement('div');
                 rightDiv.className = 'flex space-x-2';
 
@@ -219,13 +221,13 @@ const htmlContent = `
                 const btnCopy = document.createElement('button');
                 btnCopy.className = 'px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100 flex items-center';
                 btnCopy.textContent = isImg ? '复制' : '链接';
-                btnCopy.onclick = () => copyFileContent(file.url, isImg, displayName); // 安全绑定
+                btnCopy.onclick = function() { copyFileContent(file.url, isImg, displayName); };
                 rightDiv.appendChild(btnCopy);
 
                 const btnDel = document.createElement('button');
                 btnDel.className = 'px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center';
                 btnDel.textContent = '删除';
-                btnDel.onclick = () => deleteFile(file.key); // 安全绑定
+                btnDel.onclick = function() { deleteFile(file.key); };
                 rightDiv.appendChild(btnDel);
 
                 li.appendChild(rightDiv);
@@ -258,10 +260,10 @@ const htmlContent = `
                 showToast('✅ 图片已复制，可直接粘贴');
             } catch (err) {
                 console.error(err);
-                navigator.clipboard.writeText(url).then(() => showToast('⚠️ 格式不支持直接复制，已复制链接', 'info'));
+                navigator.clipboard.writeText(url).then(function() { showToast('⚠️ 格式不支持直接复制，已复制链接', 'info'); });
             }
         } else {
-            navigator.clipboard.writeText(url).then(() => showToast('🔗 文件链接已复制'));
+            navigator.clipboard.writeText(url).then(function() { showToast('🔗 文件链接已复制'); });
         }
     }
 
@@ -276,25 +278,25 @@ const htmlContent = `
     const fileInput = document.getElementById('fileInput');
     const pasteTarget = document.getElementById('pasteTarget');
 
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over');
-    dropZone.addEventListener('drop', (e) => {
+    dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
+    dropZone.addEventListener('drop', function(e) {
         e.preventDefault(); dropZone.classList.remove('drag-over');
         handleFiles(e.dataTransfer.files);
     });
     
-    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    fileInput.addEventListener('change', function(e) { handleFiles(e.target.files); });
 
-    document.addEventListener('paste', (e) => {
+    document.addEventListener('paste', function(e) {
         if (e.target === pasteTarget || e.target === notepad) return; 
         handlePasteEvent(e);
     });
 
-    pasteTarget.addEventListener('paste', (e) => {
+    pasteTarget.addEventListener('paste', function(e) {
         e.preventDefault(); 
         handlePasteEvent(e);
         pasteTarget.innerHTML = ''; 
-        setTimeout(() => pasteTarget.blur(), 100); 
+        setTimeout(function() { pasteTarget.blur(); }, 100); 
     });
     
     function handlePasteEvent(e) {
@@ -312,7 +314,8 @@ const htmlContent = `
 
     async function handleFiles(files) {
         if (!files.length) return;
-        showToast(\`开始上传 \${files.length} 个文件...\`, 'info');
+        // 改用拼接
+        showToast('开始上传 ' + files.length + ' 个文件...', 'info');
         
         for (let file of files) {
             try {
@@ -322,13 +325,14 @@ const htmlContent = `
                 });
                 const { url } = await signRes.json();
                 await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-                showToast(\`✅ \${file.name} 上传成功\`);
-            } catch (e) { showToast(\`❌ \${file.name} 上传失败\`, 'error'); }
+                // 改用拼接
+                showToast('✅ ' + file.name + ' 上传成功');
+            } catch (e) { showToast('❌ ' + file.name + ' 上传失败', 'error'); }
         }
         refreshAll();
     }
 
-    window.preview = (url, isImg) => {
+    window.preview = function(url, isImg) {
         const modal = document.getElementById('previewModal');
         const img = document.getElementById('previewImage');
         const unknown = document.getElementById('previewUnknown');
@@ -339,12 +343,12 @@ const htmlContent = `
             img.classList.add('hidden'); unknown.classList.remove('hidden');
         }
     }
-    window.closePreview = () => {
+    window.closePreview = function() {
         document.getElementById('previewModal').classList.add('hidden');
         document.getElementById('previewImage').src = '';
     }
 
-    // 初始化调用 refreshAll
+    // 初始化调用
     refreshAll();
 </script>
 </body>
