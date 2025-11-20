@@ -82,17 +82,15 @@ const htmlContent = `
     </div>
 
 <script>
-    // 使用安全的字符串拼接
     const API_BASE = '/api'; 
     const notepad = document.getElementById('notepad');
     
-    // === 核心修改：新的状态提示函数 ===
+    // === 状态提示函数 ===
     let msgTimeout;
     function showStatus(message, type) {
         const el = document.getElementById('globalMsg');
         if (!el) return;
         
-        // 设置颜色：默认绿色，错误红色，信息蓝色
         let colorClass = 'text-green-500';
         if (type === 'error') colorClass = 'text-red-500';
         if (type === 'info') colorClass = 'text-blue-500';
@@ -100,16 +98,15 @@ const htmlContent = `
         el.className = 'text-sm mr-3 font-medium transition-opacity duration-500 opacity-100 ' + colorClass;
         el.innerText = message;
         
-        // 清除上一次的定时器，防止闪烁
         if (msgTimeout) clearTimeout(msgTimeout);
         
-        // 3秒后淡出
         msgTimeout = setTimeout(function() {
             el.classList.remove('opacity-100');
             el.classList.add('opacity-0');
         }, 3000);
     }
 
+    // === 1. 文本逻辑 ===
     async function loadText() {
         try {
             const res = await fetch(API_BASE + '/text');
@@ -144,7 +141,7 @@ const htmlContent = `
         } catch (err) { showStatus('读取失败，请手动粘贴', 'error'); }
     }
 
-    // === 列表渲染 ===
+    // === 2. 列表渲染 ===
     const fileListEl = document.getElementById('fileList');
     const loadingEl = document.getElementById('loading');
 
@@ -196,11 +193,12 @@ const htmlContent = `
                 const rightDiv = document.createElement('div');
                 rightDiv.className = 'flex space-x-2';
 
-                const btnDown = document.createElement('a');
-                btnDown.href = file.url;
-                btnDown.download = displayName;
+                // === 修改点：下载按钮逻辑 ===
+                const btnDown = document.createElement('button');
                 btnDown.className = 'px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 flex items-center';
                 btnDown.textContent = '下载';
+                // 绑定自定义下载函数
+                btnDown.onclick = function() { handleDownload(file.url, displayName); };
                 rightDiv.appendChild(btnDown);
 
                 const btnCopy = document.createElement('button');
@@ -220,6 +218,39 @@ const htmlContent = `
             });
             showStatus('更新已保存 ^_^');
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
+    }
+
+    // === 3. 新增：处理文件下载 ===
+    async function handleDownload(url, filename) {
+        // 1. 确认弹窗
+        if(!confirm('确认下载文件：' + filename + ' ？')) return;
+        
+        showStatus('正在下载 ' + filename + ' ...', 'info');
+        
+        try {
+            // 2. 使用 fetch 获取文件 Blob
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Network error');
+            const blob = await response.blob();
+            
+            // 3. 创建临时链接触发保存
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            
+            // 清理
+            window.URL.revokeObjectURL(blobUrl);
+            document.body.removeChild(a);
+            
+            // 4. 顶部提示成功
+            showStatus(filename + ' 已下载', 'success');
+        } catch (e) {
+            console.error(e);
+            showStatus('下载失败，请重试', 'error');
+        }
     }
 
     async function copyFileContent(url, isImg, filename) {
