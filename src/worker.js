@@ -15,36 +15,10 @@ const htmlContent = `
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
         body { -webkit-tap-highlight-color: transparent; }
-        .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff; }
         .loader { border-top-color: #3498db; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
         @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* === Toast 消息组件 (极简绿色小字版) === */
-        #toast-container {
-            position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
-            z-index: 9999; pointer-events: none;
-            display: flex; flex-direction: column; align-items: center; gap: 8px;
-        }
-        .toast {
-            /* 默认成功样式：白底绿字，细边框，阴影 */
-            background: #ffffff; 
-            color: #059669; /* green-600 */
-            border: 1px solid #d1fae5; /* green-100 */
-            padding: 8px 20px;
-            border-radius: 99px; /* 胶囊圆角 */
-            font-size: 13px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-            opacity: 0; transition: all 0.3s ease; transform: translateY(-10px);
-            display: flex; align-items: center; font-weight: 500;
-        }
-        .toast.show { opacity: 1; transform: translateY(0); }
-        
-        /* 错误提示：白底红字 */
-        .toast-error { color: #dc2626; border-color: #fee2e2; }
-        /* 普通信息：白底蓝字 */
-        .toast-info { color: #2563eb; border-color: #dbeafe; }
-
-        /* === 粘贴区域 === */
+        /* 粘贴区域样式 */
         #pasteTarget {
             font-size: 14px; color: #6b7280; background: #f9fafb;
             border: 1px dashed #d1d5db; border-radius: 6px;
@@ -58,15 +32,12 @@ const htmlContent = `
 </head>
 <body class="bg-gray-50 text-gray-700 h-screen flex flex-col md:flex-row overflow-hidden">
 
-    <div id="toast-container"></div>
-
     <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 flex flex-col border-r border-gray-200 bg-white">
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📝 文本同步</h2>
             <div class="space-x-2">
                 <button onclick="readTextClipboard()" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded active:bg-gray-300">读取剪切板</button>
                 <button onclick="copyText()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-2 rounded active:bg-blue-200">复制全文</button>
-                <span id="saveStatus" class="text-xs text-green-500 hidden">已保存</span>
             </div>
         </div>
         <textarea id="notepad" class="w-full flex-1 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 transition text-base font-mono" placeholder="在这里输入文本，失去焦点自动保存..."></textarea>
@@ -75,11 +46,16 @@ const htmlContent = `
     <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 flex flex-col bg-gray-50">
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
-            <div class="space-x-2 flex">
-                 <button onclick="refreshAll()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 全局刷新</button>
-                 <button onclick="document.getElementById('fileInput').click()" class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-blue-800">
-                    📤 选择文件
-                 </button>
+            
+            <div class="flex items-center">
+                 <span id="globalMsg" class="text-sm mr-3 font-medium transition-opacity duration-500 opacity-0 text-green-500"></span>
+                 
+                 <div class="space-x-2 flex">
+                     <button onclick="refreshAll()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-gray-100">🔄 全局刷新</button>
+                     <button onclick="document.getElementById('fileInput').click()" class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded shadow-sm whitespace-nowrap active:bg-blue-800">
+                        📤 选择文件
+                     </button>
+                 </div>
             </div>
         </div>
 
@@ -87,9 +63,7 @@ const htmlContent = `
             <p class="text-gray-500 pointer-events-none text-sm hidden md:block">
                 电脑端：拖拽文件 或 Ctrl+V 粘贴
             </p>
-            
             <div id="pasteTarget" contenteditable="true"></div>
-            
             <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer hidden">
         </div>
 
@@ -108,27 +82,32 @@ const htmlContent = `
     </div>
 
 <script>
-    // 使用安全的字符串拼接，防止 Worker 解析错误
+    // 使用安全的字符串拼接
     const API_BASE = '/api'; 
     const notepad = document.getElementById('notepad');
-    const saveStatus = document.getElementById('saveStatus');
-
-    function showToast(message, type) {
-        if (!type) type = 'success';
-        const container = document.getElementById('toast-container');
-        const toast = document.createElement('div');
-        // 动态拼接 CSS 类名
-        toast.className = 'toast ' + (type === 'success' ? '' : (type === 'error' ? 'toast-error' : 'toast-info'));
-        toast.innerText = message;
-        container.appendChild(toast);
+    
+    // === 核心修改：新的状态提示函数 ===
+    let msgTimeout;
+    function showStatus(message, type) {
+        const el = document.getElementById('globalMsg');
+        if (!el) return;
         
-        requestAnimationFrame(function() { toast.classList.add('show'); });
+        // 设置颜色：默认绿色，错误红色，信息蓝色
+        let colorClass = 'text-green-500';
+        if (type === 'error') colorClass = 'text-red-500';
+        if (type === 'info') colorClass = 'text-blue-500';
         
-        // 2秒后消失
-        setTimeout(function() {
-            toast.classList.remove('show');
-            setTimeout(function() { toast.remove(); }, 300);
-        }, 2000);
+        el.className = 'text-sm mr-3 font-medium transition-opacity duration-500 opacity-100 ' + colorClass;
+        el.innerText = message;
+        
+        // 清除上一次的定时器，防止闪烁
+        if (msgTimeout) clearTimeout(msgTimeout);
+        
+        // 3秒后淡出
+        msgTimeout = setTimeout(function() {
+            el.classList.remove('opacity-100');
+            el.classList.add('opacity-0');
+        }, 3000);
     }
 
     async function loadText() {
@@ -139,14 +118,12 @@ const htmlContent = `
     }
 
     notepad.addEventListener('blur', async function() {
-        saveStatus.innerText = '保存中...';
-        saveStatus.classList.remove('hidden');
+        showStatus('正在保存...', 'info');
         try {
             await fetch(API_BASE + '/text', { method: 'POST', body: notepad.value });
-            saveStatus.innerText = '已保存';
-            setTimeout(function() { saveStatus.classList.add('hidden'); }, 2000);
+            showStatus('文本已保存 ^_^');
         } catch(e) {
-            saveStatus.innerText = '保存失败'; saveStatus.classList.add('text-red-500');
+            showStatus('保存失败', 'error');
         }
     });
 
@@ -154,8 +131,8 @@ const htmlContent = `
         notepad.select(); 
         try {
             document.execCommand('copy'); 
-            showToast('文本已复制');
-        } catch(e) { showToast('复制失败', 'error'); }
+            showStatus('文本已复制');
+        } catch(e) { showStatus('复制失败', 'error'); }
     }
 
     async function readTextClipboard() {
@@ -163,8 +140,8 @@ const htmlContent = `
             const text = await navigator.clipboard.readText();
             notepad.value = text;
             notepad.dispatchEvent(new Event('blur'));
-            showToast('已读取剪切板');
-        } catch (err) { showToast('读取失败，请手动粘贴', 'error'); }
+            showStatus('已读取剪切板');
+        } catch (err) { showStatus('读取失败，请手动粘贴', 'error'); }
     }
 
     // === 列表渲染 ===
@@ -241,15 +218,14 @@ const htmlContent = `
                 li.appendChild(rightDiv);
                 fileListEl.appendChild(li);
             });
-            showToast('内容已刷新');
+            showStatus('更新已保存 ^_^');
         } catch(e) { loadingEl.classList.add('hidden'); console.error(e); }
     }
 
     async function copyFileContent(url, isImg, filename) {
-        // 移动端优先系统分享
         if (isImg && navigator.canShare && navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
             try {
-                showToast('正在调起分享...', 'info');
+                showStatus('正在调起分享...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
                 const file = new File([blob], filename, { type: blob.type });
@@ -260,19 +236,19 @@ const htmlContent = `
 
         if (isImg) {
             try {
-                showToast('正在下载...', 'info');
+                showStatus('正在下载...', 'info');
                 const response = await fetch(url);
                 const blob = await response.blob();
                 await navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob })
                 ]);
-                showToast('图片已复制');
+                showStatus('图片已复制');
             } catch (err) {
                 console.error(err);
-                navigator.clipboard.writeText(url).then(function() { showToast('已复制链接', 'info'); });
+                navigator.clipboard.writeText(url).then(function() { showStatus('链接已复制', 'info'); });
             }
         } else {
-            navigator.clipboard.writeText(url).then(function() { showToast('链接已复制'); });
+            navigator.clipboard.writeText(url).then(function() { showStatus('链接已复制'); });
         }
     }
 
@@ -280,7 +256,7 @@ const htmlContent = `
         if(!confirm('确定删除文件?')) return;
         await fetch(API_BASE + '/delete', { method: 'POST', body: JSON.stringify({ key }) });
         refreshAll();
-        showToast('文件已删除');
+        showStatus('文件已删除');
     }
 
     const dropZone = document.getElementById('dropZone');
@@ -317,13 +293,13 @@ const htmlContent = `
         if (files.length > 0) {
             handleFiles(files);
         } else {
-            showToast('未检测到图片', 'info');
+            showStatus('未检测到图片', 'info');
         }
     }
 
     async function handleFiles(files) {
         if (!files.length) return;
-        showToast('正在上传 ' + files.length + ' 个文件...', 'info');
+        showStatus('正在上传 ' + files.length + ' 个文件...', 'info');
         
         for (let file of files) {
             try {
@@ -333,8 +309,8 @@ const htmlContent = `
                 });
                 const { url } = await signRes.json();
                 await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-                showToast(file.name + ' 上传成功');
-            } catch (e) { showToast(file.name + ' 上传失败', 'error'); }
+                showStatus(file.name + ' 上传成功');
+            } catch (e) { showStatus(file.name + ' 上传失败', 'error'); }
         }
         refreshAll();
     }
