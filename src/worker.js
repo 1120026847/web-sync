@@ -301,7 +301,7 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            const downloadBase = env.APP_HOST || bucketUrl;
+            cconst downloadBase = env.APP_HOST;
             
             // =========================================================
             // 安全升级：生成带签名的 URL (Presigned URL)
