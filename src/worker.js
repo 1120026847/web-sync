@@ -2,7 +2,6 @@ import { AwsClient } from 'aws4fetch';
 
 // ==========================================
 // 1. 前端页面代码 (HTML + CSS + JS)
-// 保持不变
 // ==========================================
 const htmlContent = `
 <!DOCTYPE html>
@@ -61,9 +60,30 @@ const htmlContent = `
         </div>
     </div>
 
+    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded shadow-lg text-sm transition-opacity duration-300 opacity-0 pointer-events-none z-50">
+        提示信息
+    </div>
+
 <script>
-    // 配置 API 路径 (当前域名下)
     const API_BASE = '/api'; 
+
+    // === 工具函数：显示提示 ===
+    function showToast(msg, type = 'info') {
+        const toast = document.getElementById('toast');
+        toast.innerText = msg;
+        toast.className = \`fixed top-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg text-sm transition-opacity duration-300 z-50 \${type === 'error' ? 'bg-red-500 text-white' : 'bg-gray-800 text-white'}\`;
+        toast.classList.remove('opacity-0');
+        setTimeout(() => toast.classList.add('opacity-0'), 3000);
+    }
+
+    // === 工具函数：格式化文件大小 ===
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
 
     // === 文本逻辑 ===
     const textarea = document.getElementById('notepad');
@@ -92,7 +112,7 @@ const htmlContent = `
     function copyText() {
         textarea.select();
         document.execCommand('copy');
-        alert('文本已复制');
+        showToast('文本已复制');
     }
 
     async function readTextClipboard() {
@@ -101,7 +121,7 @@ const htmlContent = `
             textarea.value = text;
             textarea.dispatchEvent(new Event('blur'));
         } catch (err) {
-            alert('需要 HTTPS 权限读取剪切板');
+            showToast('需要 HTTPS 权限读取剪切板', 'error');
         }
     }
 
@@ -138,7 +158,7 @@ const htmlContent = `
                 });
                 const { url } = await signRes.json();
                 await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-            } catch (e) { alert('上传失败: ' + file.name); }
+            } catch (e) { showToast('上传失败: ' + file.name, 'error'); }
         }
         dropZone.innerHTML = '<p class="text-gray-500 pointer-events-none">拖拽文件、粘贴(Ctrl+V) 或 <span class="text-blue-500">点击上传</span></p><input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">';
         refreshFiles();
@@ -157,8 +177,26 @@ const htmlContent = `
                 }
             }
             if (files.length > 0) handleFiles(files);
-            else alert("剪切板无图片");
-        } catch (err) { alert("读取失败 (需要HTTPS)"); }
+            else showToast("剪切板无图片", 'error');
+        } catch (err) { showToast("读取失败 (需要HTTPS)", 'error'); }
+    }
+
+    // ✨ 新增：复制图片本体
+    async function copyImageBody(url) {
+        showToast('正在获取图片数据...', 'info');
+        try {
+            const data = await fetch(url);
+            const blob = await data.blob();
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    [blob.type]: blob
+                })
+            ]);
+            showToast('✅ 图片已复制到剪切板');
+        } catch (err) {
+            console.error(err);
+            showToast('复制失败，请手动下载', 'error');
+        }
     }
 
     async function refreshFiles() {
@@ -169,9 +207,16 @@ const htmlContent = `
             const files = await res.json();
             loadingEl.classList.add('hidden');
             files.forEach(file => {
-                const sizeStr = (file.size / 1024).toFixed(1) + ' KB';
+                // ✨ 使用格式化大小
+                const sizeStr = formatFileSize(file.size);
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
+                
+                // ✨ 构建复制按钮逻辑
+                const copyAction = isImg 
+                    ? \`copyImageBody('\${file.url}')\` 
+                    : \`copyFileLink('\${file.url}')\`;
+                
                 const li = document.createElement('li');
                 li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group';
                 li.innerHTML = \`
@@ -185,7 +230,7 @@ const htmlContent = `
                     </div>
                     <div class="flex space-x-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <a href="\${file.url}" download class="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">⬇️</a>
-                        <button onclick="copyFileLink('\${file.url}')" class="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded">🔗</button>
+                        <button onclick="\${copyAction}" class="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded">🔗</button>
                         <button onclick="deleteFile('\${file.key}')" class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded">🗑️</button>
                     </div>\`;
                 fileListEl.appendChild(li);
@@ -200,7 +245,7 @@ const htmlContent = `
     }
 
     function copyFileLink(url) {
-        navigator.clipboard.writeText(url).then(() => alert('链接已复制'));
+        navigator.clipboard.writeText(url).then(() => showToast('链接已复制'));
     }
 
     window.preview = (url, isImg) => {
@@ -237,12 +282,10 @@ export default {
       'Access-Control-Allow-Headers': 'Content-Type',
     };
 
-    // 处理 CORS 预检请求
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // 初始化腾讯云 COS 客户端
     const client = new AwsClient({
       accessKeyId: env.COS_SECRET_ID,
       secretAccessKey: env.COS_SECRET_KEY,
@@ -250,22 +293,15 @@ export default {
       service: 's3',
     });
     
-    // 注意：这个 bucketUrl 用于 Worker 内部和 COS 通信（列出文件、删除文件），
-    // 必须保持为腾讯云的默认域名，不能改。
     const bucketUrl = `https://${env.COS_BUCKET_NAME}.cos.${env.COS_REGION}.myqcloud.com`;
 
-    // ==========================
-    // 路由匹配逻辑
-    // ==========================
-
-    // 1. 首页：返回 HTML 界面
     if (url.pathname === '/') {
         return new Response(htmlContent, {
             headers: { 'Content-Type': 'text/html;charset=UTF-8' }
         });
     }
 
-    // 2. API: 获取/更新 文本信息
+    // API: 文本同步
     if (url.pathname === '/api/text') {
       const textKey = 'sync_data/notepad.txt';
       if (request.method === 'GET') {
@@ -280,21 +316,19 @@ export default {
       }
     }
 
-    // 3. API: 获取文件列表 (【已修改】：支持私有桶下载)
+    // API: 文件列表
     if (url.pathname === '/api/files' && request.method === 'GET') {
       const res = await client.fetch(`${bucketUrl}?list-type=2&prefix=uploads/`);
       const xml = await res.text();
       const files = [];
       const contentsRegex = /<Contents>([\s\S]*?)<\/Contents>/g;
       
-      // 先收集所有匹配项，避免在 while 循环中处理异步 await
       const matches = [];
       let match;
       while ((match = contentsRegex.exec(xml)) !== null) {
           matches.push(match[1]);
       }
 
-      // 遍历解析并生成签名
       for (const content of matches) {
         const key = /<Key>(.*?)<\/Key>/.exec(content)[1];
         const size = /<Size>(.*?)<\/Size>/.exec(content)[1];
@@ -302,19 +336,13 @@ export default {
         
         if(!key.endsWith('/')) {
             const downloadBase = env.APP_HOST;
-            
-            // =========================================================
-            // 安全升级：生成带签名的 URL (Presigned URL)
-            // 这样即使桶是私有的，前端也能凭借这个带签名的链接下载
-            // =========================================================
             const fullUrl = `${downloadBase}/${key}`;
             
             const signed = await client.sign(fullUrl, {
                 method: 'GET',
-                aws: { signQuery: true } // 这会在 URL 后追加 ?X-Amz-Signature=...
+                aws: { signQuery: true }
             });
 
-            // 将签名后的 URL 放入列表
             files.push({ key, size, date, url: signed.url });
         }
       }
@@ -323,10 +351,9 @@ export default {
       return new Response(JSON.stringify(files), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // 4. API: 获取上传预签名 URL
+    // API: 预签名上传
     if (url.pathname === '/api/sign-upload' && request.method === 'POST') {
       const { filename, type } = await request.json();
-      // 使用时间戳防止文件名冲突
       const key = `uploads/${Date.now()}_${filename}`;
       
       const signed = await client.sign(`${bucketUrl}/${key}`, {
@@ -338,14 +365,13 @@ export default {
       return new Response(JSON.stringify({ url: signed.url, key: key }), { headers: corsHeaders });
     }
 
-    // 5. API: 删除文件
+    // API: 删除文件
     if (url.pathname === '/api/delete' && request.method === 'POST') {
         const { key } = await request.json();
         await client.fetch(`${bucketUrl}/${key}`, { method: 'DELETE' });
         return new Response('Deleted', { headers: corsHeaders });
     }
 
-    // 404 处理
     return new Response("Not Found", { status: 404 });
   },
 };
