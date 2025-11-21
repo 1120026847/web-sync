@@ -280,28 +280,45 @@ export default {
       }
     }
 
-    // 3. API: 获取文件列表
+    // 3. API: 获取文件列表 (【已修改】：支持私有桶下载)
     if (url.pathname === '/api/files' && request.method === 'GET') {
       const res = await client.fetch(`${bucketUrl}?list-type=2&prefix=uploads/`);
       const xml = await res.text();
       const files = [];
       const contentsRegex = /<Contents>([\s\S]*?)<\/Contents>/g;
+      
+      // 先收集所有匹配项，避免在 while 循环中处理异步 await
+      const matches = [];
       let match;
       while ((match = contentsRegex.exec(xml)) !== null) {
-        const content = match[1];
+          matches.push(match[1]);
+      }
+
+      // 遍历解析并生成签名
+      for (const content of matches) {
         const key = /<Key>(.*?)<\/Key>/.exec(content)[1];
         const size = /<Size>(.*?)<\/Size>/.exec(content)[1];
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            // 【修改点在此】：
-            // 检查环境变量 APP_HOST 是否存在（即你的自定义下载域名，如 http://dl.molijun.com）
-            // 如果存在，则使用它来拼接下载链接；否则回退到默认域名。
             const downloadBase = env.APP_HOST || bucketUrl;
             
-            files.push({ key, size, date, url: `${downloadBase}/${key}` });
+            // =========================================================
+            // 安全升级：生成带签名的 URL (Presigned URL)
+            // 这样即使桶是私有的，前端也能凭借这个带签名的链接下载
+            // =========================================================
+            const fullUrl = `${downloadBase}/${key}`;
+            
+            const signed = await client.sign(fullUrl, {
+                method: 'GET',
+                aws: { signQuery: true } // 这会在 URL 后追加 ?X-Amz-Signature=...
+            });
+
+            // 将签名后的 URL 放入列表
+            files.push({ key, size, date, url: signed.url });
         }
       }
+      
       files.sort((a, b) => new Date(b.date) - new Date(a.date));
       return new Response(JSON.stringify(files), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
