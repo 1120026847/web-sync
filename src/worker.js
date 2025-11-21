@@ -301,7 +301,7 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            cconst downloadBase = env.APP_HOST;
+            const downloadBase = 'https://dl.molijun.com';
             
             // =========================================================
             // 安全升级：生成带签名的 URL (Presigned URL)
