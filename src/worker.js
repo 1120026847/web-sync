@@ -335,7 +335,9 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            const downloadBase = env.APP_HOST;
+            // 【关键修复】：增加默认值，防止 env.APP_HOST 读取失败导致 500 错误
+            const downloadBase = env.APP_HOST || 'https://dl.molijun.com';
+            
             const fullUrl = `${downloadBase}/${key}`;
             
             const signed = await client.sign(fullUrl, {
