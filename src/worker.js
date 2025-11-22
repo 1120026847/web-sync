@@ -181,12 +181,35 @@ const htmlContent = `
         } catch (err) { showToast("读取失败 (需要HTTPS)", 'error'); }
     }
 
-    // ✨ 新增：复制图片本体
+    // ✨ 新增：格式转换辅助函数 (JPG -> PNG)
+    // 浏览器剪切板通常只支持写入 PNG
+    function convertBlobToPng(blob) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob((pngBlob) => resolve(pngBlob), 'image/png');
+            };
+            img.src = URL.createObjectURL(blob);
+        });
+    }
+
+    // ✨ 修复：复制图片本体 (支持 JPG 自动转 PNG)
     async function copyImageBody(url) {
         showToast('正在获取图片数据...', 'info');
         try {
             const data = await fetch(url);
-            const blob = await data.blob();
+            let blob = await data.blob();
+            
+            // 如果是 JPEG，转换为 PNG，否则写入剪切板会报错
+            if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
+                blob = await convertBlobToPng(blob);
+            }
+
             await navigator.clipboard.write([
                 new ClipboardItem({
                     [blob.type]: blob
@@ -195,7 +218,31 @@ const htmlContent = `
             showToast('✅ 图片已复制到剪切板');
         } catch (err) {
             console.error(err);
-            showToast('复制失败，请手动下载', 'error');
+            showToast('复制失败: 格式不支持或跨域限制', 'error');
+        }
+    }
+
+    // ✨ 新增：强制下载文件 (解决跨域只能预览问题)
+    async function downloadFile(url, filename) {
+        showToast('正在开始下载...', 'info');
+        try {
+            const res = await fetch(url);
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            // 释放内存
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            showToast('✅ 下载已开始');
+        } catch(e) {
+            // 兜底方案
+            window.open(url, '_blank');
         }
     }
 
@@ -207,12 +254,11 @@ const htmlContent = `
             const files = await res.json();
             loadingEl.classList.add('hidden');
             files.forEach(file => {
-                // ✨ 使用格式化大小
                 const sizeStr = formatFileSize(file.size);
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
                 
-                // ✨ 构建复制按钮逻辑
+                // 构建逻辑：图片复制本体，文件复制链接
                 const copyAction = isImg 
                     ? \`copyImageBody('\${file.url}')\` 
                     : \`copyFileLink('\${file.url}')\`;
@@ -229,7 +275,7 @@ const htmlContent = `
                         </div>
                     </div>
                     <div class="flex space-x-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <a href="\${file.url}" download class="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">⬇️</a>
+                        <button onclick="downloadFile('\${file.url}', '\${displayName}')" class="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">⬇️</button>
                         <button onclick="\${copyAction}" class="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded">🔗</button>
                         <button onclick="deleteFile('\${file.key}')" class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded">🗑️</button>
                     </div>\`;
@@ -335,7 +381,7 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            // 【关键修复】：增加默认值，防止 env.APP_HOST 读取失败导致 500 错误
+            // 兜底逻辑：如果环境变量未设置，回退到硬编码域名
             const downloadBase = env.APP_HOST || 'https://dl.molijun.com';
             
             const fullUrl = `${downloadBase}/${key}`;
