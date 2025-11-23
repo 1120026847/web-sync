@@ -100,7 +100,6 @@ const htmlContent = `
     const textarea = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
 
-    // 修改 loadText 支持静默模式和防冲突
     async function loadText(isAuto = false) {
         // 关键逻辑：如果用户正在输入（文本框聚焦），则不拉取云端数据，防止覆盖
         if (isAuto && document.activeElement === textarea) {
@@ -111,7 +110,6 @@ const htmlContent = `
             const res = await fetch(API_BASE + '/text');
             if(res.ok) {
                 const cloudText = await res.text();
-                // 只有当内容不同时才更新，避免光标跳动
                 if (textarea.value !== cloudText) {
                     textarea.value = cloudText;
                     if(isAuto) console.log("文本已自动更新");
@@ -127,8 +125,7 @@ const htmlContent = `
             await fetch(API_BASE + '/text', { method: 'POST', body: textarea.value });
             saveStatus.innerText = '已保存';
             setTimeout(() => saveStatus.classList.add('hidden'), 2000);
-            // 保存后立即触发一次刷新，确保版本最新
-            refreshFiles(true); 
+            refreshFiles(true); // 保存后立即更新列表
         } catch(e) {
             saveStatus.innerText = '保存失败';
             saveStatus.classList.add('text-red-500');
@@ -145,7 +142,7 @@ const htmlContent = `
         try {
             const text = await navigator.clipboard.readText();
             textarea.value = text;
-            textarea.dispatchEvent(new Event('blur')); // 触发自动保存
+            textarea.dispatchEvent(new Event('blur'));
         } catch (err) {
             showToast('需要 HTTPS 权限读取剪切板', 'error');
         }
@@ -187,7 +184,7 @@ const htmlContent = `
             } catch (e) { showToast('上传失败: ' + file.name, 'error'); }
         }
         dropZone.innerHTML = '<p class="text-gray-500 pointer-events-none">拖拽文件、粘贴(Ctrl+V) 或 <span class="text-blue-500">点击上传</span></p><input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">';
-        refreshAll(); // 上传完立即刷新
+        refreshAll();
     }
     
     async function uploadFromClipboard() {
@@ -207,22 +204,7 @@ const htmlContent = `
         } catch (err) { showToast("读取失败 (需要HTTPS)", 'error'); }
     }
 
-    async function copyImageBody(url) {
-        showToast('正在获取图片数据...', 'info');
-        try {
-            const data = await fetch(url);
-            let blob = await data.blob();
-            if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
-                blob = await convertBlobToPng(blob);
-            }
-            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-            showToast('✅ 图片已复制到剪切板');
-        } catch (err) {
-            console.error(err);
-            showToast('复制失败: 格式不支持或跨域限制', 'error');
-        }
-    }
-
+    // 格式转换：JPG -> PNG
     function convertBlobToPng(blob) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -238,7 +220,23 @@ const htmlContent = `
         });
     }
 
-    // 修改 refreshFiles 支持自动刷新模式
+    async function copyImageBody(url) {
+        showToast('正在获取图片数据...', 'info');
+        try {
+            const data = await fetch(url);
+            let blob = await data.blob();
+            // 浏览器剪切板兼容性处理
+            if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
+                blob = await convertBlobToPng(blob);
+            }
+            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+            showToast('✅ 图片已复制到剪切板');
+        } catch (err) {
+            console.error(err);
+            showToast('复制失败: 格式不支持或跨域限制', 'error');
+        }
+    }
+
     async function refreshFiles(isAuto = false) {
         if(!isAuto) {
             fileListEl.innerHTML = '';
@@ -249,22 +247,24 @@ const htmlContent = `
             const res = await fetch(API_BASE + '/files');
             const files = await res.json();
             
-            // 自动刷新时，对比数据，如果没有变化则不重绘 DOM，防止闪烁
+            // 自动刷新防闪烁：如果数据没变，不重绘 DOM
             const currentHash = JSON.stringify(files.map(f => f.key));
             if (isAuto && currentHash === lastFileJson) {
-                return; // 数据没变，直接返回
+                return; 
             }
             lastFileJson = currentHash;
 
             if(!isAuto) loadingEl.classList.add('hidden');
             
-            // 重绘列表
-            fileListEl.innerHTML = ''; // 清空旧列表
+            fileListEl.innerHTML = '';
             files.forEach(file => {
                 const sizeStr = formatFileSize(file.size);
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
-                const copyAction = isImg ? \`copyImageBody('\${file.url}')\` : \`copyFileLink('\${file.url}')\`;
+                
+                const copyAction = isImg 
+                    ? \`copyImageBody('\${file.url}')\` 
+                    : \`copyFileLink('\${file.url}')\`;
                 
                 const li = document.createElement('li');
                 li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group';
@@ -328,16 +328,25 @@ const htmlContent = `
     }
     window.closePreview = () => document.getElementById('previewModal').classList.add('hidden');
 
-    // === 初始化与自动轮询 ===
+    // === 初始化与智能休眠轮询 ===
     
-    // 1. 页面加载时刷新一次
+    // 1. 页面加载时立即刷新
     refreshAll();
 
-    // 2. 开启自动轮询 (每 5 秒检查一次)
-    // 这样既保证了多端同步，又不会太频繁消耗流量
+    // 2. 设置轮询：仅当页面可见时运行，极度省钱
     setInterval(() => {
-        refreshAll(true); // true 表示自动模式，不显示 Loading 弹窗
-    }, 5000);
+        if (!document.hidden) {
+            refreshAll(true); // 自动静默刷新
+        }
+    }, 5000); // 5秒一次
+
+    // 3. 页面重新可见时（切回来），立即刷新
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            console.log("页面回到前台，立即刷新...");
+            refreshAll(true);
+        }
+    });
 
 </script>
 </body>
@@ -410,7 +419,9 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
+            // 兜底逻辑：如果环境变量读取失败，使用硬编码域名，防止 500 错误
             const downloadBase = env.APP_HOST || 'https://dl.molijun.com';
+            
             const fullUrl = `${downloadBase}/${key}`;
             
             const signed = await client.sign(fullUrl, {
