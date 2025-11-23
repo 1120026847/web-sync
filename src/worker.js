@@ -65,29 +65,21 @@ const htmlContent = `
 <script>
     const API_BASE = '/api'; 
     let lastFileJson = ''; 
-    let toastTimeout; // 用于清除定时器，防止闪烁
+    let toastTimeout; 
 
-    // === 工具函数：无感提示 (显示在按钮左侧) ===
+    // === 无感提示函数 ===
     function showToast(msg, type = 'info') {
         const el = document.getElementById('globalStatus');
         el.innerText = msg;
-        
-        // 设置颜色：错误用红色，其他用绿色
         el.className = \`text-xs font-medium transition-opacity duration-500 mr-2 \${type === 'error' ? 'text-red-500' : 'text-green-600'}\`;
-        
-        // 显示
         el.classList.remove('opacity-0');
-
-        // 清除上一次的定时器（如果有），重新倒计时
         if (toastTimeout) clearTimeout(toastTimeout);
-
-        // 3秒后自动淡出
         toastTimeout = setTimeout(() => {
             el.classList.add('opacity-0');
         }, 3000);
     }
 
-    // === 工具函数：格式化文件大小 ===
+    // === 格式化文件大小 ===
     function formatFileSize(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
@@ -140,7 +132,7 @@ const htmlContent = `
             textarea.value = text;
             textarea.dispatchEvent(new Event('blur'));
         } catch (err) {
-            showToast('需要 HTTPS 权限读取剪切板', 'error');
+            showToast('需要 HTTPS 权限', 'error');
         }
     }
 
@@ -197,9 +189,10 @@ const htmlContent = `
             }
             if (files.length > 0) handleFiles(files);
             else showToast("剪切板无图片", 'error');
-        } catch (err) { showToast("读取失败 (需要HTTPS)", 'error'); }
+        } catch (err) { showToast("读取失败", 'error'); }
     }
 
+    // ✨ 格式转换核心：任意 Blob -> PNG Blob
     function convertBlobToPng(blob) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -211,27 +204,34 @@ const htmlContent = `
                 ctx.drawImage(img, 0, 0);
                 canvas.toBlob((pngBlob) => resolve(pngBlob), 'image/png');
             };
+            // 创建 URL 来读取 Blob
             img.src = URL.createObjectURL(blob);
         });
     }
 
+    // ✨ 修复：强制转换图片格式，解决 octet-stream 报错
     async function copyImageBody(url) {
         showToast('正在获取图片...', 'info');
         try {
             const data = await fetch(url);
-            let blob = await data.blob();
-            if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
-                blob = await convertBlobToPng(blob);
-            }
-            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+            const originalBlob = await data.blob();
+            
+            // 关键修改：不管云端返回什么类型（octet-stream/jpg/png）
+            // 统统用 Canvas 重新渲染一遍，强制转为浏览器最喜欢的 image/png
+            const pngBlob = await convertBlobToPng(originalBlob);
+
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    [pngBlob.type]: pngBlob // 这里一定是 image/png
+                })
+            ]);
             showToast('✅ 图片已复制');
         } catch (err) {
             console.error(err);
-            showToast('复制失败', 'error');
+            showToast('复制失败，请下载', 'error');
         }
     }
 
-    // 全局刷新
     async function refreshAll(isAuto = false) {
         if (!isAuto) showToast('正在同步...', 'info');
         await Promise.all([loadText(isAuto), refreshFiles(isAuto)]);
@@ -323,7 +323,6 @@ const htmlContent = `
     }
     window.closePreview = () => document.getElementById('previewModal').classList.add('hidden');
 
-    // 智能轮询
     refreshAll();
     setInterval(() => { if (!document.hidden) refreshAll(true); }, 5000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(true); });
