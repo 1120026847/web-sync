@@ -36,7 +36,9 @@ const htmlContent = `
     <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 flex flex-col bg-gray-50">
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
-            <div class="space-x-2">
+            <div class="flex items-center space-x-2">
+                 <span id="globalStatus" class="text-xs font-medium transition-opacity duration-500 opacity-0 mr-2"></span>
+                 
                  <button onclick="refreshAll()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-1 rounded shadow-sm">🔄 全局刷新</button>
                  <button onclick="uploadFromClipboard()" class="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1 rounded">上传剪切板图片</button>
             </div>
@@ -60,21 +62,29 @@ const htmlContent = `
         </div>
     </div>
 
-    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded shadow-lg text-sm transition-opacity duration-300 opacity-0 pointer-events-none z-50">
-        提示信息
-    </div>
-
 <script>
     const API_BASE = '/api'; 
-    let lastFileJson = ''; // 用于比对文件列表是否变化
+    let lastFileJson = ''; 
+    let toastTimeout; // 用于清除定时器，防止闪烁
 
-    // === 工具函数：显示提示 ===
+    // === 工具函数：无感提示 (显示在按钮左侧) ===
     function showToast(msg, type = 'info') {
-        const toast = document.getElementById('toast');
-        toast.innerText = msg;
-        toast.className = \`fixed top-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg text-sm transition-opacity duration-300 z-50 \${type === 'error' ? 'bg-red-500 text-white' : 'bg-gray-800 text-white'}\`;
-        toast.classList.remove('opacity-0');
-        setTimeout(() => toast.classList.add('opacity-0'), 3000);
+        const el = document.getElementById('globalStatus');
+        el.innerText = msg;
+        
+        // 设置颜色：错误用红色，其他用绿色
+        el.className = \`text-xs font-medium transition-opacity duration-500 mr-2 \${type === 'error' ? 'text-red-500' : 'text-green-600'}\`;
+        
+        // 显示
+        el.classList.remove('opacity-0');
+
+        // 清除上一次的定时器（如果有），重新倒计时
+        if (toastTimeout) clearTimeout(toastTimeout);
+
+        // 3秒后自动淡出
+        toastTimeout = setTimeout(() => {
+            el.classList.add('opacity-0');
+        }, 3000);
     }
 
     // === 工具函数：格式化文件大小 ===
@@ -86,26 +96,12 @@ const htmlContent = `
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
-    // === 核心：全局刷新逻辑 ===
-    async function refreshAll(isAuto = false) {
-        if (!isAuto) showToast('正在同步...', 'info');
-        
-        // 并行执行文本和文件刷新
-        await Promise.all([loadText(isAuto), refreshFiles(isAuto)]);
-        
-        if (!isAuto) showToast('✅ 同步完成');
-    }
-
     // === 文本逻辑 ===
     const textarea = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
 
     async function loadText(isAuto = false) {
-        // 关键逻辑：如果用户正在输入（文本框聚焦），则不拉取云端数据，防止覆盖
-        if (isAuto && document.activeElement === textarea) {
-            return; 
-        }
-
+        if (isAuto && document.activeElement === textarea) return; 
         try {
             const res = await fetch(API_BASE + '/text');
             if(res.ok) {
@@ -125,7 +121,7 @@ const htmlContent = `
             await fetch(API_BASE + '/text', { method: 'POST', body: textarea.value });
             saveStatus.innerText = '已保存';
             setTimeout(() => saveStatus.classList.add('hidden'), 2000);
-            refreshFiles(true); // 保存后立即更新列表
+            refreshFiles(true);
         } catch(e) {
             saveStatus.innerText = '保存失败';
             saveStatus.classList.add('text-red-500');
@@ -204,7 +200,6 @@ const htmlContent = `
         } catch (err) { showToast("读取失败 (需要HTTPS)", 'error'); }
     }
 
-    // 格式转换：JPG -> PNG
     function convertBlobToPng(blob) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -221,20 +216,26 @@ const htmlContent = `
     }
 
     async function copyImageBody(url) {
-        showToast('正在获取图片数据...', 'info');
+        showToast('正在获取图片...', 'info');
         try {
             const data = await fetch(url);
             let blob = await data.blob();
-            // 浏览器剪切板兼容性处理
             if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
                 blob = await convertBlobToPng(blob);
             }
             await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-            showToast('✅ 图片已复制到剪切板');
+            showToast('✅ 图片已复制');
         } catch (err) {
             console.error(err);
-            showToast('复制失败: 格式不支持或跨域限制', 'error');
+            showToast('复制失败', 'error');
         }
+    }
+
+    // 全局刷新
+    async function refreshAll(isAuto = false) {
+        if (!isAuto) showToast('正在同步...', 'info');
+        await Promise.all([loadText(isAuto), refreshFiles(isAuto)]);
+        if (!isAuto) showToast('✅ 同步完成');
     }
 
     async function refreshFiles(isAuto = false) {
@@ -247,11 +248,8 @@ const htmlContent = `
             const res = await fetch(API_BASE + '/files');
             const files = await res.json();
             
-            // 自动刷新防闪烁：如果数据没变，不重绘 DOM
             const currentHash = JSON.stringify(files.map(f => f.key));
-            if (isAuto && currentHash === lastFileJson) {
-                return; 
-            }
+            if (isAuto && currentHash === lastFileJson) return;
             lastFileJson = currentHash;
 
             if(!isAuto) loadingEl.classList.add('hidden');
@@ -261,10 +259,7 @@ const htmlContent = `
                 const sizeStr = formatFileSize(file.size);
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
-                
-                const copyAction = isImg 
-                    ? \`copyImageBody('\${file.url}')\` 
-                    : \`copyFileLink('\${file.url}')\`;
+                const copyAction = isImg ? \`copyImageBody('\${file.url}')\` : \`copyFileLink('\${file.url}')\`;
                 
                 const li = document.createElement('li');
                 li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group';
@@ -288,7 +283,7 @@ const htmlContent = `
     }
 
     async function downloadFile(url, filename) {
-        showToast('正在开始下载...', 'info');
+        showToast('开始下载...', 'info');
         try {
             const res = await fetch(url);
             const blob = await res.blob();
@@ -328,25 +323,10 @@ const htmlContent = `
     }
     window.closePreview = () => document.getElementById('previewModal').classList.add('hidden');
 
-    // === 初始化与智能休眠轮询 ===
-    
-    // 1. 页面加载时立即刷新
+    // 智能轮询
     refreshAll();
-
-    // 2. 设置轮询：仅当页面可见时运行，极度省钱
-    setInterval(() => {
-        if (!document.hidden) {
-            refreshAll(true); // 自动静默刷新
-        }
-    }, 5000); // 5秒一次
-
-    // 3. 页面重新可见时（切回来），立即刷新
-    document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) {
-            console.log("页面回到前台，立即刷新...");
-            refreshAll(true);
-        }
-    });
+    setInterval(() => { if (!document.hidden) refreshAll(true); }, 5000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(true); });
 
 </script>
 </body>
@@ -419,9 +399,8 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            // 兜底逻辑：如果环境变量读取失败，使用硬编码域名，防止 500 错误
+            // 兜底逻辑
             const downloadBase = env.APP_HOST || 'https://dl.molijun.com';
-            
             const fullUrl = `${downloadBase}/${key}`;
             
             const signed = await client.sign(fullUrl, {
