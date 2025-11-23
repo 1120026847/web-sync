@@ -37,7 +37,7 @@ const htmlContent = `
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-gray-800">📂 文件传输</h2>
             <div class="space-x-2">
-                 <button onclick="refreshFiles()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-1 rounded shadow-sm">🔄 刷新</button>
+                 <button onclick="refreshAll()" class="text-xs bg-white border hover:bg-gray-50 px-3 py-1 rounded shadow-sm">🔄 全局刷新</button>
                  <button onclick="uploadFromClipboard()" class="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1 rounded">上传剪切板图片</button>
             </div>
         </div>
@@ -66,6 +66,7 @@ const htmlContent = `
 
 <script>
     const API_BASE = '/api'; 
+    let lastFileJson = ''; // 用于比对文件列表是否变化
 
     // === 工具函数：显示提示 ===
     function showToast(msg, type = 'info') {
@@ -85,14 +86,37 @@ const htmlContent = `
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
+    // === 核心：全局刷新逻辑 ===
+    async function refreshAll(isAuto = false) {
+        if (!isAuto) showToast('正在同步...', 'info');
+        
+        // 并行执行文本和文件刷新
+        await Promise.all([loadText(isAuto), refreshFiles(isAuto)]);
+        
+        if (!isAuto) showToast('✅ 同步完成');
+    }
+
     // === 文本逻辑 ===
     const textarea = document.getElementById('notepad');
     const saveStatus = document.getElementById('saveStatus');
 
-    async function loadText() {
+    // 修改 loadText 支持静默模式和防冲突
+    async function loadText(isAuto = false) {
+        // 关键逻辑：如果用户正在输入（文本框聚焦），则不拉取云端数据，防止覆盖
+        if (isAuto && document.activeElement === textarea) {
+            return; 
+        }
+
         try {
             const res = await fetch(API_BASE + '/text');
-            if(res.ok) textarea.value = await res.text();
+            if(res.ok) {
+                const cloudText = await res.text();
+                // 只有当内容不同时才更新，避免光标跳动
+                if (textarea.value !== cloudText) {
+                    textarea.value = cloudText;
+                    if(isAuto) console.log("文本已自动更新");
+                }
+            }
         } catch(e) { console.error(e); }
     }
 
@@ -103,6 +127,8 @@ const htmlContent = `
             await fetch(API_BASE + '/text', { method: 'POST', body: textarea.value });
             saveStatus.innerText = '已保存';
             setTimeout(() => saveStatus.classList.add('hidden'), 2000);
+            // 保存后立即触发一次刷新，确保版本最新
+            refreshFiles(true); 
         } catch(e) {
             saveStatus.innerText = '保存失败';
             saveStatus.classList.add('text-red-500');
@@ -119,7 +145,7 @@ const htmlContent = `
         try {
             const text = await navigator.clipboard.readText();
             textarea.value = text;
-            textarea.dispatchEvent(new Event('blur'));
+            textarea.dispatchEvent(new Event('blur')); // 触发自动保存
         } catch (err) {
             showToast('需要 HTTPS 权限读取剪切板', 'error');
         }
@@ -161,7 +187,7 @@ const htmlContent = `
             } catch (e) { showToast('上传失败: ' + file.name, 'error'); }
         }
         dropZone.innerHTML = '<p class="text-gray-500 pointer-events-none">拖拽文件、粘贴(Ctrl+V) 或 <span class="text-blue-500">点击上传</span></p><input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">';
-        refreshFiles();
+        refreshAll(); // 上传完立即刷新
     }
     
     async function uploadFromClipboard() {
@@ -181,8 +207,22 @@ const htmlContent = `
         } catch (err) { showToast("读取失败 (需要HTTPS)", 'error'); }
     }
 
-    // ✨ 新增：格式转换辅助函数 (JPG -> PNG)
-    // 浏览器剪切板通常只支持写入 PNG
+    async function copyImageBody(url) {
+        showToast('正在获取图片数据...', 'info');
+        try {
+            const data = await fetch(url);
+            let blob = await data.blob();
+            if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
+                blob = await convertBlobToPng(blob);
+            }
+            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+            showToast('✅ 图片已复制到剪切板');
+        } catch (err) {
+            console.error(err);
+            showToast('复制失败: 格式不支持或跨域限制', 'error');
+        }
+    }
+
     function convertBlobToPng(blob) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -198,70 +238,33 @@ const htmlContent = `
         });
     }
 
-    // ✨ 修复：复制图片本体 (支持 JPG 自动转 PNG)
-    async function copyImageBody(url) {
-        showToast('正在获取图片数据...', 'info');
-        try {
-            const data = await fetch(url);
-            let blob = await data.blob();
-            
-            // 如果是 JPEG，转换为 PNG，否则写入剪切板会报错
-            if (blob.type === 'image/jpeg' || blob.type === 'image/jpg') {
-                blob = await convertBlobToPng(blob);
-            }
-
-            await navigator.clipboard.write([
-                new ClipboardItem({
-                    [blob.type]: blob
-                })
-            ]);
-            showToast('✅ 图片已复制到剪切板');
-        } catch (err) {
-            console.error(err);
-            showToast('复制失败: 格式不支持或跨域限制', 'error');
+    // 修改 refreshFiles 支持自动刷新模式
+    async function refreshFiles(isAuto = false) {
+        if(!isAuto) {
+            fileListEl.innerHTML = '';
+            loadingEl.classList.remove('hidden');
         }
-    }
-
-    // ✨ 新增：强制下载文件 (解决跨域只能预览问题)
-    async function downloadFile(url, filename) {
-        showToast('正在开始下载...', 'info');
-        try {
-            const res = await fetch(url);
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            // 释放内存
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-            showToast('✅ 下载已开始');
-        } catch(e) {
-            // 兜底方案
-            window.open(url, '_blank');
-        }
-    }
-
-    async function refreshFiles() {
-        fileListEl.innerHTML = '';
-        loadingEl.classList.remove('hidden');
+        
         try {
             const res = await fetch(API_BASE + '/files');
             const files = await res.json();
-            loadingEl.classList.add('hidden');
+            
+            // 自动刷新时，对比数据，如果没有变化则不重绘 DOM，防止闪烁
+            const currentHash = JSON.stringify(files.map(f => f.key));
+            if (isAuto && currentHash === lastFileJson) {
+                return; // 数据没变，直接返回
+            }
+            lastFileJson = currentHash;
+
+            if(!isAuto) loadingEl.classList.add('hidden');
+            
+            // 重绘列表
+            fileListEl.innerHTML = ''; // 清空旧列表
             files.forEach(file => {
                 const sizeStr = formatFileSize(file.size);
                 const displayName = file.key.replace('uploads/', '').split('_').slice(1).join('_');
                 const isImg = /\\.(jpg|jpeg|png|gif|webp)$/i.test(displayName);
-                
-                // 构建逻辑：图片复制本体，文件复制链接
-                const copyAction = isImg 
-                    ? \`copyImageBody('\${file.url}')\` 
-                    : \`copyFileLink('\${file.url}')\`;
+                const copyAction = isImg ? \`copyImageBody('\${file.url}')\` : \`copyFileLink('\${file.url}')\`;
                 
                 const li = document.createElement('li');
                 li.className = 'p-3 hover:bg-gray-50 flex items-center justify-between group';
@@ -281,13 +284,30 @@ const htmlContent = `
                     </div>\`;
                 fileListEl.appendChild(li);
             });
-        } catch(e) { loadingEl.classList.add('hidden'); }
+        } catch(e) { if(!isAuto) loadingEl.classList.add('hidden'); }
+    }
+
+    async function downloadFile(url, filename) {
+        showToast('正在开始下载...', 'info');
+        try {
+            const res = await fetch(url);
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            showToast('✅ 下载已开始');
+        } catch(e) { window.open(url, '_blank'); }
     }
 
     async function deleteFile(key) {
         if(!confirm('确定删除?')) return;
         await fetch(API_BASE + '/delete', { method: 'POST', body: JSON.stringify({ key }) });
-        refreshFiles();
+        refreshAll();
     }
 
     function copyFileLink(url) {
@@ -308,8 +328,17 @@ const htmlContent = `
     }
     window.closePreview = () => document.getElementById('previewModal').classList.add('hidden');
 
-    loadText();
-    refreshFiles();
+    // === 初始化与自动轮询 ===
+    
+    // 1. 页面加载时刷新一次
+    refreshAll();
+
+    // 2. 开启自动轮询 (每 5 秒检查一次)
+    // 这样既保证了多端同步，又不会太频繁消耗流量
+    setInterval(() => {
+        refreshAll(true); // true 表示自动模式，不显示 Loading 弹窗
+    }, 5000);
+
 </script>
 </body>
 </html>
@@ -381,9 +410,7 @@ export default {
         const date = /<LastModified>(.*?)<\/LastModified>/.exec(content)[1];
         
         if(!key.endsWith('/')) {
-            // 兜底逻辑：如果环境变量未设置，回退到硬编码域名
             const downloadBase = env.APP_HOST || 'https://dl.molijun.com';
-            
             const fullUrl = `${downloadBase}/${key}`;
             
             const signed = await client.sign(fullUrl, {
